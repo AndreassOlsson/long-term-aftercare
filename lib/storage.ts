@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { get, list, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 
 // Where entries and pictures are kept. On Vercel this is the project's Blob
 // store (private access). Without a Blob token it falls back to files on
@@ -89,4 +89,44 @@ export async function listKeys(prefix: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/** Removes one stored object. A key that is not there is not an error. */
+export async function deleteObject(key: string): Promise<void> {
+  if (storageKind() === "blob") {
+    await del(key);
+    return;
+  }
+  await fs.rm(diskPath(key), { force: true });
+}
+
+/**
+ * Removes everything stored under a prefix, for putting the demo back to its
+ * starting state. Returns how many objects went.
+ */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const keys = await listKeysDeep(prefix);
+  await Promise.all(keys.map((key) => deleteObject(key)));
+  return keys.length;
+}
+
+// listKeys on disk reads one folder level; this walks the folders below it.
+async function listKeysDeep(prefix: string): Promise<string[]> {
+  if (storageKind() === "blob") return listKeys(prefix);
+  const found: string[] = [];
+  const walk = async (dir: string) => {
+    let entries;
+    try {
+      entries = await fs.readdir(diskPath(dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const key = `${dir}${entry.name}`;
+      if (entry.isDirectory()) await walk(`${key}/`);
+      else found.push(key);
+    }
+  };
+  await walk(prefix);
+  return found;
 }
