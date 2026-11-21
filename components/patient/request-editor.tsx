@@ -100,7 +100,7 @@ export function RequestEditor({
     <>
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Ask for a check-up</h1>
-        <Link href="/patient/clinic" className="min-h-11 content-center text-accent underline underline-offset-2">
+        <Link href="/patient#clinic" className="min-h-11 content-center text-accent underline underline-offset-2">
           Cancel
         </Link>
       </header>
@@ -124,7 +124,7 @@ export function RequestEditor({
           <ul className="mt-2 flex flex-wrap gap-2">
             {dates.map((d) => (
               <li key={d} className="flex items-center rounded-full border border-line bg-surface pl-3">
-                <Link href={`/patient/history?day=${d}`} className="min-h-11 content-center text-accent underline underline-offset-2">
+                <Link href={`/patient?day=${d}#history`} className="min-h-11 content-center text-accent underline underline-offset-2">
                   {formatDate(d)}
                 </Link>
                 <button type="button" onClick={() => setDates((cur) => cur.filter((x) => x !== d))} aria-label={`Leave out ${formatDate(d)}`} className="min-h-11 px-3">

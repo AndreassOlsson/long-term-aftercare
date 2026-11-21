@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { AutoRefresh } from "@/components/clinician/auto-refresh";
 import { ago, dateTime } from "@/components/clinician/format";
 import { reasonLine } from "@/components/clinician/case";
 import { requireRole } from "@/lib/auth";
@@ -28,6 +29,7 @@ export default async function Page() {
 
   return (
     <div className="space-y-10">
+      <AutoRefresh />
       <section aria-labelledby="needs">
         <div className="mb-3 flex items-baseline justify-between">
           <h1 id="needs" className="text-2xl font-semibold">

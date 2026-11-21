@@ -1,18 +1,7 @@
-import { History } from "@/components/patient/history";
-import { getEntries } from "@/lib/entries";
-import { PATIENTS } from "@/lib/patients";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
+// The history is a section of the one page now (/patient#history).
 export default async function Page({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const { day } = await searchParams;
-  const entries = await getEntries(PATIENTS[0].id);
-  const initialDay = day && entries.some((e) => e.date === day) ? day : null;
-  return (
-    <>
-      <h1 className="text-2xl font-semibold">Your history</h1>
-      <p className="-mt-3 text-muted">How well your prosthesis has been working. Higher on the graph is better.</p>
-      <History entries={entries} initialDay={initialDay} />
-    </>
-  );
+  redirect(day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? `/patient?day=${day}#history` : "/patient#history");
 }

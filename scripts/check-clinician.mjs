@@ -2,7 +2,9 @@
 //   sample request saved -> login -> it tops the inbox with its reason ->
 //   opening it marks it seen -> an evidence day opens from it -> an offered
 //   time is sent (answered, reply readable through getRequest) -> the reset
-//   puts the stored data back to the starting state. Also: a check-in in
+//   puts the stored data back to the starting state. Also: a new request
+//   appears in the open inbox without a reload, and the request downloads as a
+//   PDF with her name and its headline. Also: a check-in in
 //   which the patient scored one measure herself shows in the record and in
 //   the day as picked by the patient.
 // Run after `npm run build`. It starts the app itself on a free port with the
@@ -12,6 +14,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { pageCount, pdfText } from "./pdf-text.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
@@ -83,8 +86,14 @@ try {
   check("the empty inbox says nothing is waiting", await page.getByText("No check-up requests are waiting").isVisible());
   check("placeholder patients read as placeholders", (await page.getByText("Placeholder", { exact: true }).count()) >= 3);
 
+  // The inbox picks up a new request by itself, with nobody reloading the page.
+  await page.evaluate(() => {
+    window.__inboxMarker = "never reloaded";
+  });
   const saved = await api("/api/demo/request", "POST");
   check("a sample request is saved", saved.ok());
+  await page.getByText("Comfort and mobility have fallen").first().waitFor({ timeout: 20_000 });
+  check("it appears in the open inbox without a reload", (await page.evaluate(() => window.__inboxMarker)) === "never reloaded");
 
   // A check-in in which the patient scored one measure herself, made through her own screens.
   const patientContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -96,9 +105,12 @@ try {
   await patientPage.waitForURL(`${base}/patient`);
   await patientPage.goto(`${base}/patient/checkin`);
   await patientPage.getByLabel("Your notes for today").fill("The liner itched in the afternoon and the socket felt tight when I walked.");
-  await patientPage.locator("button[data-measure=comfort][data-step='2']").click();
-  await patientPage.getByRole("button", { name: "Save my check-in" }).click();
-  await patientPage.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
+  await patientPage.getByText("Or score it yourself").click();
+  await patientPage.locator("button[data-measure=comfort][data-step='3']").click();
+  await patientPage.getByRole("button", { name: "Continue" }).click();
+  await patientPage.getByTestId("closing-message").waitFor();
+  await patientPage.getByRole("button", { name: "Add to my record", exact: true }).click();
+  await patientPage.waitForURL(`${base}/patient`);
   await patientContext.close();
 
   // The record marks the figure she picked herself, in the day and in the list of entries.
@@ -137,6 +149,18 @@ try {
   await page.waitForSelector("text=What has changed");
   check("the case shows the patient's own words", await page.getByTestId("request-body").isVisible());
   await shoot("04-request-case");
+
+  // The request as a PDF: a document, with her name and the request's headline.
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByTestId("request-pdf").click()]);
+  const pdfPath = path.join(shots ?? root, "clinician-request.pdf");
+  await download.saveAs(pdfPath);
+  const pdf = readFileSync(pdfPath);
+  const words = pdfText(pdf);
+  const squash = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  check("the clinician's download is a PDF", pdf.subarray(0, 5).toString() === "%PDF-" && /\.pdf$/.test(download.suggestedFilename()), download.suggestedFilename());
+  check("it contains her name and the request's headline", words.includes("Maria Andersson") && squash(words).includes(squash("Comfort and mobility have fallen for two weeks")), words.slice(0, 200));
+  check("it has what changed, the figures, her words and the date", /What has changed/.test(words) && /Usual/.test(words) && /In her words/.test(words) && /Check-up request sent/.test(words));
+  console.log(`      (${pageCount(pdf)} page(s), ${pdf.length} bytes)`);
 
   // An evidence day.
   await page.locator('[data-day]').filter({ hasText: /\d{4}/ }).first().click();

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
 import { analyze } from "./agents/metrics-agent";
+import { askAboutToday, closeToday, type Closing, type DayJudgement, type Exchange } from "./agents/reflect-agent";
 import { getTodaysQuestions } from "./agents/question-agent";
 import { draftRequest, type RequestDraft } from "./agents/request-agent";
 import { mentionsWoundOrInfection } from "./agents/safety";
@@ -159,6 +160,57 @@ const toScores = (raw: z.infer<typeof scoresSchema>): Scores => {
   return scores;
 };
 
+// ------------------------------------------------- the answer to a bad day
+
+const reflectSchema = z.object({
+  text: z.string().max(10_000),
+  scores: scoresSchema,
+  imageCount: z.number().int().min(0).max(MAX_IMAGES),
+  question: z.string().max(2000).nullable().optional(),
+  answer: z.string().max(4000).optional(),
+});
+
+type ReflectInput = z.input<typeof reflectSchema>;
+
+export type AskResult =
+  | { status: "ok"; judgement: DayJudgement; exchange: Exchange }
+  | { status: "error"; message: string };
+export type CloseResult = { status: "ok"; closing: Closing } | { status: "error"; message: string };
+
+/**
+ * After the entry and the picture are in and before anything is saved: today in
+ * the light of the days before. On a bad day that follows bad days, one question.
+ * Nothing is stored.
+ */
+export async function reflectOnCheckin(input: ReflectInput): Promise<AskResult> {
+  if (!(await isSignedIn("patient"))) return signedOut;
+  const parsed = reflectSchema.safeParse(input);
+  if (!parsed.success) return { status: "error", message: "That check-in could not be read back. Try again." };
+  try {
+    const { text, scores, imageCount } = parsed.data;
+    const result = await askAboutToday(patientId, today(), { text, scores: toScores(scores), imageCount }, mentionsWoundOrInfection(text));
+    return { status: "ok", ...result };
+  } catch (error) {
+    console.error("Reflecting on the check-in failed", error);
+    return { status: "error", message: "Something went wrong. Your words are still here; try again." };
+  }
+}
+
+/** Her answer taken, the close: what will be entered and, when warranted, the recommendation. */
+export async function closeCheckinExchange(input: ReflectInput): Promise<CloseResult> {
+  if (!(await isSignedIn("patient"))) return signedOut;
+  const parsed = reflectSchema.safeParse(input);
+  if (!parsed.success) return { status: "error", message: "That check-in could not be read back. Try again." };
+  try {
+    const { text, scores, imageCount, question, answer } = parsed.data;
+    const closing = await closeToday(patientId, today(), { text, scores: toScores(scores), imageCount }, mentionsWoundOrInfection(text), { question: question ?? null, answer: answer ?? "" });
+    return { status: "ok", closing };
+  } catch (error) {
+    console.error("Closing the check-in failed", error);
+    return { status: "error", message: "Something went wrong. Your words are still here; try again." };
+  }
+}
+
 /**
  * Step two: what the agent read is written to the record, together with the
  * words, the pictures and which scores were her own. Her own scores are put
@@ -169,6 +221,9 @@ export async function commitCheckin(formData: FormData): Promise<CommitResult> {
   if (!(await isSignedIn("patient"))) return signedOut;
   const text = String(formData.get("text") ?? "").trim();
   const own = readOwnScores(formData);
+  // The one question asked on a bad day and her answer to it, kept with the entry.
+  const followUpQuestion = String(formData.get("followUpQuestion") ?? "").trim().slice(0, 2000);
+  const followUpAnswer = String(formData.get("followUpAnswer") ?? "").trim().slice(0, 4000);
   let analysis: Analysis;
   try {
     const parsed = z
@@ -209,7 +264,7 @@ export async function commitCheckin(formData: FormData): Promise<CommitResult> {
       rationale: analysis.rationale,
       ownScores: ownKeys(own).length ? own : undefined,
       questions,
-      followUp: null,
+      followUp: followUpQuestion ? { question: followUpQuestion, answer: followUpAnswer || null } : null,
       analyzedBy: analysis.analyzedBy,
       caseSummary: null,
       safetyFlag: concern || undefined,

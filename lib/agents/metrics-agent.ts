@@ -141,6 +141,12 @@ function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
     const count = (words: string[]) => words.filter((w) => joined.includes(w)).length;
     scores[m.key] = clampScore(3 + count(POSITIVE) - count(NEGATIVE));
   }
+  // "Feeling bad today" names no measure, but it is still her report: with nothing
+  // mentioned by name, the general words stand for all three she did not score herself.
+  if (METRICS.every((m) => scores[m.key] === null || own.includes(m.key))) {
+    const general = clampScore(3 + POSITIVE.filter((w) => text.includes(w)).length - NEGATIVE.filter((w) => text.includes(w)).length);
+    if (general !== null && general !== 3) for (const m of METRICS) if (!own.includes(m.key)) scores[m.key] = general;
+  }
   const missing = missingMetrics(scores).filter((m) => !own.includes(m.key));
   return {
     scores,
