@@ -70,7 +70,8 @@ export function PatientHome({
     router.refresh();
   }
 
-  const doneToday = entries.some((e) => e.date === today && e.analyzedBy !== "seed");
+  const todaysEntry = entries.find((e) => e.date === today && e.analyzedBy !== "seed") ?? null;
+  const doneToday = todaysEntry !== null;
   const shown = entries.slice(-Math.max(2, days));
 
   return (
@@ -124,7 +125,7 @@ export function PatientHome({
         </button>
       </div>
 
-      {sheetOpen && <AssessmentSheet questions={questions} onClose={() => setSheetOpen(false)} onSaved={saved} />}
+      {sheetOpen && <AssessmentSheet existing={todaysEntry} questions={questions} onClose={() => setSheetOpen(false)} onSaved={saved} />}
     </main>
   );
 }

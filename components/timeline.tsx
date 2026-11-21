@@ -16,11 +16,14 @@ import type { Entry } from "@/lib/types";
 const BIG = 220; // height of the combined graph
 const SMALL = 96; // height of each metric graph when expanded
 const GAP = 34; // room above each metric graph for its label
-const LEFT = 26;
+const LEFT = 34; // room for the axis and its 1-5 labels
 const RIGHT = 14;
+const BOTTOM = 22; // room for the dates under the last graph
+const MIN_DATE_GAP = 64; // px between date labels on the x axis
 const SPLIT_MS = 800;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const SCORE_TICKS = Array.from({ length: SCORE_MAX - SCORE_MIN + 1 }, (_, i) => SCORE_MIN + i);
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 function useWidth<T extends HTMLElement>() {
@@ -90,7 +93,14 @@ export function Timeline({
   const selected = entries[selectedIndex];
   const inner = Math.max(1, width - LEFT - RIGHT);
   const x = (i: number) => LEFT + (n <= 1 ? inner / 2 : (i / (n - 1)) * inner);
-  const height = lerp(BIG, METRICS.length * (SMALL + GAP), t);
+  const height = lerp(BIG, METRICS.length * (SMALL + GAP), t) + BOTTOM;
+
+  // As many dates as fit, evenly spread, always including the first and last.
+  const dateCount = Math.min(n, Math.max(2, Math.floor(inner / MIN_DATE_GAP) + 1));
+  const dateTicks =
+    n <= 1
+      ? Array.from({ length: n }, (_, i) => i)
+      : [...new Set(Array.from({ length: dateCount }, (_, j) => Math.round((j / (dateCount - 1)) * (n - 1))))];
 
   const bands = METRICS.map((metric, k) => {
     const top = lerp(8, k * (SMALL + GAP) + GAP - 6, t);
@@ -116,8 +126,10 @@ export function Timeline({
       path += `${pen ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`;
       pen = true;
     }
-    return { metric, k, top, bandHeight, path, points };
+    return { metric, k, top, bandHeight, path, points, y };
   });
+  const last = bands[bands.length - 1];
+  const axisBottom = last.top + last.bandHeight + 6;
 
   function pick(event: React.MouseEvent<SVGSVGElement>) {
     if (n === 0) return;
@@ -144,7 +156,21 @@ export function Timeline({
             }
             className="block cursor-pointer select-none"
           >
-            {bands.map(({ metric, k, top, bandHeight, path, points }) => {
+            <g className="fill-current text-[11px]" aria-hidden="true">
+              {dateTicks.map((i) => (
+                <g key={entries[i].date}>
+                  <path d={`M${x(i)},${axisBottom}v4`} stroke="currentColor" strokeWidth={1.5} />
+                  <text
+                    x={x(i)}
+                    y={axisBottom + 16}
+                    textAnchor={n > 1 && i === 0 ? "start" : n > 1 && i === n - 1 ? "end" : "middle"}
+                  >
+                    {formatDate(entries[i].date)}
+                  </text>
+                </g>
+              ))}
+            </g>
+            {bands.map(({ metric, k, top, bandHeight, path, points, y }) => {
               const axis = k === 0 ? 1 : t;
               const mark = points[selectedIndex];
               return (
@@ -153,6 +179,16 @@ export function Timeline({
                     <path d={`M${LEFT - 8},${top - 4}V${top + bandHeight + 6}H${width - 2}`} />
                     <path d={`M${LEFT - 12},${top + 2}l4,-7l4,7`} />
                     <path d={`M${width - 9},${top + bandHeight + 2}l7,4l-7,4`} />
+                  </g>
+                  <g opacity={axis} className="fill-current text-[11px]" aria-hidden="true">
+                    {SCORE_TICKS.map((value) => (
+                      <g key={value}>
+                        <path d={`M${LEFT - 12},${y(value)}h4`} stroke="currentColor" strokeWidth={1.5} />
+                        <text x={LEFT - 15} y={y(value)} textAnchor="end" dominantBaseline="central">
+                          {value}
+                        </text>
+                      </g>
+                    ))}
                   </g>
                   <text
                     x={LEFT - 8}
@@ -261,12 +297,15 @@ export function Timeline({
                 {METRICS.map((m) => (
                   <li key={m.key}>
                     {m.label}: {selected.scores[m.key]?.toFixed(1) ?? "not mentioned"}
+                    {selected.ownScores?.[m.key] != null && " (patient's own score)"}
                   </li>
                 ))}
               </ul>
               {selected.analyzedBy !== "seed" && (
                 <p className="mt-2 text-xs text-zinc-500">
-                  {selected.analyzedBy === "claude"
+                  {METRICS.every((m) => selected.ownScores?.[m.key] != null)
+                    ? "Scored by the patient."
+                    : selected.analyzedBy === "claude"
                     ? `Scored by the AI analysis. ${selected.rationale}`
                     : "Scored by the built-in stand-in, not the AI analysis."}
                 </p>

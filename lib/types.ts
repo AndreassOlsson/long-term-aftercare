@@ -13,6 +13,8 @@ export type Entry = {
   /** Read from the metrics CSV, which is where the finalized scores live. */
   scores: Scores;
   combined: number | null;
+  /** The scores the patient picked themselves (1-5); these win over the analysis. */
+  ownScores?: Partial<Scores>;
   /** One or two sentences from the analysis on why it scored this way. */
   rationale: string;
   /** The targeted questions the patient was shown that day. */

@@ -26,8 +26,13 @@ const byCreated = <T extends { createdAt: string }>(items: T[]) =>
 export async function getEntries(patientId: string): Promise<Entry[]> {
   const notes = new Map<string, Entry>();
   for (const entry of seedEntries(patientId)) notes.set(entry.date, entry);
-  // Later saves for the same day win.
-  for (const entry of byCreated(await readAll<Entry>(entryPrefix(patientId)))) {
+  // Later saves for the same day win; the copy with the case summary shares
+  // its entry's createdAt and goes after it.
+  const saved = (await readAll<Entry>(entryPrefix(patientId))).sort(
+    (a, b) =>
+      a.createdAt.localeCompare(b.createdAt) || Number(!!a.caseSummary) - Number(!!b.caseSummary),
+  );
+  for (const entry of saved) {
     notes.set(entry.date, entry);
   }
   return (await readMetrics(patientId)).map((row) => {

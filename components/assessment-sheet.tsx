@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { submitAssessment } from "@/lib/assessment";
-import { METRICS } from "@/lib/metrics";
+import { METRICS, SCORE_MAX, SCORE_MIN, type Scores } from "@/lib/metrics";
 import type { Entry } from "@/lib/types";
 
 const MAX_IMAGES = 3;
 const MAX_SIDE = 1280;
+const SCORE_STEPS = Array.from({ length: SCORE_MAX - SCORE_MIN + 1 }, (_, i) => SCORE_MIN + i);
 
 /** Shrinks a photo in the browser so three of them fit in one upload. */
 async function shrink(file: File): Promise<File> {
@@ -24,6 +25,18 @@ async function shrink(file: File): Promise<File> {
   } catch {
     return file;
   }
+}
+
+/** Makes a textarea as tall as its text (never below its rows), so nothing scrolls inside it. */
+function useGrow(value: string) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [value]);
+  return ref;
 }
 
 // Dictation uses the browser's own speech recognition where it exists
@@ -48,18 +61,28 @@ function recognitionCtor(): RecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** A picture in the form: one already saved today (key) or a new one (file). */
+type Picture = { url: string; key: string; file?: never } | { url: string; file: File; key?: never };
+
 export function AssessmentSheet({
+  existing,
   questions,
   onClose,
   onSaved,
 }: {
+  /** Today's saved entry, when the patient is correcting it. */
+  existing: Entry | null;
   /** Today's targeted questions; null while they are still being prepared. */
   questions: string[] | null;
   onClose: () => void;
   onSaved: (entry: Entry) => void;
 }) {
-  const [text, setText] = useState("");
-  const [images, setImages] = useState<{ file: File; url: string }[]>([]);
+  const [text, setText] = useState(existing?.text ?? "");
+  const [images, setImages] = useState<Picture[]>(
+    () =>
+      existing?.images.map((key) => ({ key, url: `/api/images?key=${encodeURIComponent(key)}` })) ?? [],
+  );
+  const [ownScores, setOwnScores] = useState<Partial<Scores>>(existing?.ownScores ?? {});
   const [question, setQuestion] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
@@ -67,6 +90,8 @@ export function AssessmentSheet({
   const [listening, setListening] = useState(false);
   const [canTalk, setCanTalk] = useState(false);
   const recognition = useRef<Recognition | null>(null);
+  const textBox = useGrow(text);
+  const answerBox = useGrow(answer);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -120,7 +145,14 @@ export function AssessmentSheet({
     setError(null);
     const form = new FormData();
     form.set("text", text);
-    for (const image of images) form.append("images", image.file);
+    for (const m of METRICS) {
+      const value = ownScores[m.key];
+      if (value != null) form.set(`score_${m.key}`, String(value));
+    }
+    for (const image of images) {
+      if (image.file) form.append("images", image.file);
+      else form.append("keepImages", image.key);
+    }
     if (question) {
       form.set("followUpQuestion", question);
       if (!skip) form.set("followUpAnswer", answer);
@@ -141,7 +173,7 @@ export function AssessmentSheet({
     else setError(result.message);
   }
 
-  const box = "w-full rounded-2xl border border-zinc-400 p-3 text-base";
+  const box = "w-full resize-none overflow-hidden rounded-2xl border border-zinc-400 p-3 text-base";
   const button = "w-full rounded-xl border border-zinc-400 px-3 py-3 font-medium disabled:opacity-50";
 
   return (
@@ -150,11 +182,11 @@ export function AssessmentSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="assessment-title"
-        className="flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto rounded-3xl bg-white p-5"
+        className="flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto overscroll-contain rounded-3xl bg-white p-5 *:shrink-0"
       >
         <div className="flex items-start justify-between gap-3">
           <h2 id="assessment-title" className="text-lg font-semibold">
-            Today&apos;s assessment
+            {existing ? "Update today's assessment" : "Today's assessment"}
           </h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-lg leading-none">
             ✕
@@ -163,6 +195,13 @@ export function AssessmentSheet({
 
         {question === null ? (
           <>
+            {existing && (
+              <p className="text-sm text-zinc-600">
+                This is what you saved earlier today. Change the scores or the
+                text, remove a picture by tapping it, or add another, then
+                press Done to save it again.
+              </p>
+            )}
             <p className="text-sm text-zinc-700">
               Express freely with text or images about your experience with the
               prosthesis. Please talk about{" "}
@@ -180,7 +219,43 @@ export function AssessmentSheet({
                 </ul>
               )}
             </div>
+            <fieldset className="flex flex-col gap-3">
+              <legend className="mb-2 text-sm text-zinc-700">
+                Score today yourself, if you like (1 is worst, 5 is best). Tap
+                a chosen score again to clear it.
+              </legend>
+              {METRICS.map((m) => (
+                <div key={m.key} className="flex flex-col gap-1">
+                  <span className="text-sm font-medium" id={`score-${m.key}`}>
+                    {m.label}
+                  </span>
+                  <div role="group" aria-labelledby={`score-${m.key}`} className="flex gap-2">
+                    {SCORE_STEPS.map((value) => {
+                      const chosen = ownScores[m.key] === value;
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={chosen}
+                          aria-label={`${m.label} ${value} of ${SCORE_MAX}`}
+                          disabled={busy}
+                          onClick={() =>
+                            setOwnScores((current) => ({ ...current, [m.key]: chosen ? null : value }))
+                          }
+                          className={`h-11 flex-1 rounded-xl border font-medium ${
+                            chosen ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-400"
+                          }`}
+                        >
+                          {value}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </fieldset>
             <textarea
+              ref={textBox}
               value={text}
               onChange={(event) => setText(event.target.value)}
               rows={6}
@@ -210,6 +285,7 @@ export function AssessmentSheet({
             <p className="text-sm text-zinc-700">One more thing, if you like:</p>
             <p className="font-medium">{question}</p>
             <textarea
+              ref={answerBox}
               value={answer}
               onChange={(event) => setAnswer(event.target.value)}
               rows={4}
@@ -257,7 +333,12 @@ export function AssessmentSheet({
           <button
             type="button"
             onClick={() => submit(false)}
-            disabled={busy || (question === null ? !text.trim() && images.length === 0 : !answer.trim())}
+            disabled={
+              busy ||
+              (question === null
+                ? !text.trim() && images.length === 0 && !METRICS.some((m) => ownScores[m.key] != null)
+                : !answer.trim())
+            }
             className={`${button} bg-zinc-900 text-white`}
           >
             {busy ? "Working on it…" : question === null ? "Done" : "Answer"}

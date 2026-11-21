@@ -23,6 +23,8 @@ export type AnalysisInput = {
   questions: string[];
   /** Set on the second pass, when the patient has answered or skipped. */
   followUp: { question: string; answer: string | null } | null;
+  /** Scores the patient picked themselves. They are kept as they are. */
+  ownScores: Partial<Scores>;
 };
 
 export type AnalysisResult = {
@@ -57,6 +59,12 @@ async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisResult> 
   const parts = [`Today is ${input.date}.`];
   if (input.questions.length) {
     parts.push(`Before writing, the patient was shown these questions:\n${input.questions.map((q) => `- ${q}`).join("\n")}`);
+  }
+  const own = METRICS.filter((m) => input.ownScores[m.key] != null);
+  if (own.length) {
+    parts.push(
+      `The patient scored these themselves, and their scores stand: ${own.map((m) => `${m.key} ${input.ownScores[m.key]}`).join(", ")}. Record them unchanged and do not ask about them.`,
+    );
   }
   parts.push(`Today's entry from the patient:\n\n${input.text.trim() || "(no text, pictures only)"}`);
   if (input.followUp) {
@@ -127,7 +135,7 @@ function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
     const count = (words: string[]) => words.filter((w) => joined.includes(w)).length;
     scores[m.key] = clampScore(3 + count(POSITIVE) - count(NEGATIVE));
   }
-  const missing = missingMetrics(scores);
+  const missing = missingMetrics(scores).filter((m) => input.ownScores[m.key] == null);
   return {
     scores,
     rationale: "Scored by the built-in keyword stand-in, not by the AI analysis.",
@@ -139,13 +147,27 @@ function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
   };
 }
 
+/** The patient's own scores replace the analysis's; a follow-up is only for what is still missing. */
+function withOwnScores(result: AnalysisResult, input: AnalysisInput): AnalysisResult {
+  const scores = { ...result.scores };
+  for (const m of METRICS) {
+    const own = input.ownScores[m.key];
+    if (own != null) scores[m.key] = own;
+  }
+  return {
+    ...result,
+    scores,
+    followUpQuestion: missingMetrics(scores).length === 0 ? null : result.followUpQuestion,
+  };
+}
+
 export async function analyze(input: AnalysisInput): Promise<AnalysisResult> {
   if (hasKey()) {
     try {
-      return await analyzeWithClaude(input);
+      return withOwnScores(await analyzeWithClaude(input), input);
     } catch (error) {
       console.error("Metrics agent failed, using the keyword stand-in", error);
     }
   }
-  return analyzeWithKeywords(input);
+  return withOwnScores(analyzeWithKeywords(input), input);
 }
