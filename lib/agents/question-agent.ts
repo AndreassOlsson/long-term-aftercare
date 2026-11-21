@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
-import { addDays } from "../dates";
-import { getQuestionSets, saveQuestionSet } from "../entries";
+import { addDays, formatDate } from "../dates";
+import { getEntries, getQuestionSets, saveQuestionSet } from "../entries";
 import { METRICS } from "../metrics";
 import { readMetrics } from "../metrics-csv";
 import type { QuestionSet } from "../types";
@@ -30,7 +30,9 @@ Look at the record with the tools before you decide:
 - their own words and pictures on the days that stand out. Something they mentioned once and never came back to (a red mark, a looser fit, a shortened walk) is often the best question.
 - the questions they were already asked. Do not repeat a recent question unless the thing it was about is still open, and then say that it is a follow-up.
 
-Then write one to ${MAX_QUESTIONS} questions. Make them personal and concrete: "You wrote on Tuesday that the socket had started to rub on the outside of your knee. How is that today?" is the kind of question wanted, "How is your comfort?" is not. Keep each to a sentence or two, warm and plain, in the language the patient writes in. If the record shows nothing in particular, one light question is enough.
+The point of the questions is to get her to reflect on her own patterns, and to get into the record what a clinician would have asked. So prefer questions that make her connect things over questions that ask for a status: what she was doing before it got worse, what differed on the good days and the bad ones, the time of day it starts, whether it comes with long walks, a hot day, a new routine, whether it has been the same on both sides, what she did that helped. Ask about the pattern you actually see in her record, and say what you saw ("the last three entries where you walked far are the three itchy ones").
+
+Then write one to ${MAX_QUESTIONS} questions. Make them personal and concrete: "You wrote on Tuesday that the socket had started to rub on the outside of your knee. What were you doing before it started, and does it come on at a certain time of day?" is the kind of question wanted, "How is your comfort?" is not. One question should be open enough to answer in her own words. Keep each to a sentence or two, warm and plain, in the language the patient writes in. If the record shows nothing in particular, one light question is enough.
 
 You are not giving medical advice and you do not diagnose or alarm: you ask, you do not conclude.
 
@@ -62,21 +64,19 @@ async function askClaude(patientId: string, date: string) {
   return { questions: questions.slice(0, MAX_QUESTIONS), basedOn: result.basedOn };
 }
 
-/** Stand-in without a key: the same idea from the numbers alone. */
+/** Stand-in without a key: the same idea from the numbers and her words alone. */
 async function askFromNumbers(patientId: string, date: string) {
   const rows = (await readMetrics(patientId)).filter((row) => row.date < date);
+  const entries = await getEntries(patientId);
   const last = rows[rows.length - 1];
   const questions: string[] = [];
   const reasons: string[] = [];
-  if (!last || last.date < addDays(date, -1)) {
-    questions.push("We did not hear from you yesterday. How have the last couple of days been?");
-    reasons.push("no entry yesterday");
-  } else if (last.combined !== null && last.combined < 3) {
-    questions.push("You did not feel good yesterday. How are you feeling now?");
-    reasons.push(`yesterday's combined score was ${last.combined.toFixed(1)}`);
+  if (!last || last.date < addDays(date, -10)) {
+    questions.push("It has been a while since you checked in. What has the last stretch been like, and was there a day that stood out?");
+    reasons.push("no entry in the last ten days");
   }
   if (last) {
-    const weekAgo = rows.filter((row) => row.date <= addDays(last.date, -7)).pop();
+    const weekAgo = rows.filter((row) => row.date <= addDays(last.date, -14)).pop();
     const worst = METRICS.map((m) => ({
       m,
       now: last.scores[m.key],
@@ -85,19 +85,27 @@ async function askFromNumbers(patientId: string, date: string) {
       .filter((x) => x.now !== null && x.drop >= 1)
       .sort((a, b) => b.drop - a.drop)[0];
     if (worst) {
+      const since = rows.find((row) => row.date > addDays(last.date, -21))?.date ?? last.date;
       questions.push(
-        `Your ${worst.m.label.toLowerCase()} looks worse than a week ago. What has changed?`,
+        `Your ${worst.m.label.toLowerCase()} has been worse since about ${formatDate(since)}. What was different around then: how much you were on your feet, a new routine, the weather? And what is it like at different times of the day?`,
       );
-      reasons.push(`${worst.m.key} fell by ${worst.drop.toFixed(1)} in a week`);
+      reasons.push(`${worst.m.key} fell by ${worst.drop.toFixed(1)} over two weeks`);
+    }
+    const lastWords = [...entries].reverse().find((e) => e.date < date && e.text.trim());
+    if (lastWords) {
+      questions.push(
+        `On ${formatDate(lastWords.date)} you wrote “${lastWords.text.trim().slice(0, 120).replace(/[.!?]+$/, "")}${lastWords.text.length > 120 ? "…" : ""}”. Has that changed since, and what do you think is behind it?`,
+      );
+      reasons.push(`your own words on ${lastWords.date}`);
     }
     const silent = METRICS.find((m) => rows.slice(-3).every((row) => row.scores[m.key] === null));
     if (silent) {
-      questions.push(`You have not mentioned ${silent.label.toLowerCase()} for a few days. How is it?`);
+      questions.push(`You have not mentioned ${silent.label.toLowerCase()} for a few entries. How has it been, compared with how it usually is?`);
       reasons.push(`no ${silent.key} value in the last three entries`);
     }
   }
   if (questions.length === 0) {
-    questions.push("Anything about the fit or your skin you have noticed since last time?");
+    questions.push("What did you do today that you could not have done a few months ago, and was there anything you held back from?");
     reasons.push("nothing stands out in the numbers");
   }
   return {

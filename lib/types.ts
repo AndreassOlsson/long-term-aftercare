@@ -21,6 +21,10 @@ export type Entry = {
   analyzedBy: "claude" | "dummy" | "seed";
   /** The case summary as it stood after this entry. */
   caseSummary: string | null;
+  /** The entry mentions a wound or signs of infection; the patient was told to contact the clinic. */
+  safetyFlag?: boolean;
+  /** The patient changed what was recorded. */
+  corrected?: boolean;
 };
 
 /** The targeted questions prepared for one day's assessment. */

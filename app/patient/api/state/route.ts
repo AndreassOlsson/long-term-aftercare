@@ -1,0 +1,19 @@
+import { isSignedIn } from "@/lib/auth";
+import { getEntries } from "@/lib/entries";
+import { PATIENTS } from "@/lib/patients";
+import { listRequests } from "@/lib/requests";
+
+export const dynamic = "force-dynamic";
+
+// What the record holds, for the patient who is logged in. The browser check
+// (scripts/check-patient.mjs) reads this to prove what was and was not saved.
+export async function GET() {
+  if (!(await isSignedIn("patient"))) return new Response("Not logged in", { status: 401 });
+  const id = PATIENTS[0].id;
+  const [entries, requests] = await Promise.all([getEntries(id), listRequests(id)]);
+  return Response.json({
+    entries: entries.filter((e) => e.analyzedBy !== "seed").map((e) => ({ date: e.date, text: e.text, scores: e.scores, images: e.images, analyzedBy: e.analyzedBy, corrected: e.corrected ?? false })),
+    entryCount: entries.length,
+    requests,
+  });
+}

@@ -1,4 +1,5 @@
 import { isSignedIn } from "@/lib/auth";
+import { seedPictureSvg } from "@/lib/seed-pictures";
 import { getObject } from "@/lib/storage";
 
 // Serves a stored picture to whoever is logged in, patient or clinician.
@@ -9,6 +10,12 @@ export async function GET(request: Request) {
   const key = new URL(request.url).searchParams.get("key") ?? "";
   if (!/^patients\/[a-z0-9-]+\/images\/[a-z0-9-]+\.jpg$/.test(key)) {
     return new Response("Not found", { status: 404 });
+  }
+  const seeded = key.match(/\/images\/(seed-[a-z0-9]+)\.jpg$/);
+  if (seeded) {
+    // The made-up history's pictures are drawn, not stored.
+    const svg = seedPictureSvg(seeded[1]);
+    if (svg) return new Response(svg, { headers: { "Content-Type": "image/svg+xml", "Cache-Control": "private, max-age=3600" } });
   }
   const object = await getObject(key);
   if (!object) return new Response("Not found", { status: 404 });
