@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
 import { analyze } from "./agents/metrics-agent";
 import { getTodaysQuestions } from "./agents/question-agent";
 import { summarizeCase } from "./agents/summary";
@@ -42,6 +43,7 @@ export async function submitAssessment(formData: FormData): Promise<SubmitResult
     return { status: "error", message: "Write something or add a picture first." };
   }
 
+  const started = Date.now();
   try {
     const images = await Promise.all(
       files.map(async (file) => ({
@@ -81,10 +83,27 @@ export async function submitAssessment(formData: FormData): Promise<SubmitResult
       analyzedBy: analysis.analyzedBy,
       caseSummary: null,
     };
-    const history = (await getEntries(patientId)).filter((e) => e.date !== entry.date);
-    entry.caseSummary = await summarizeCase([...history, entry]);
     await saveEntry(entry);
     await recordMetrics(patientId, date, entry.scores);
+    console.log(`Assessment saved in ${Date.now() - started} ms, scored by ${entry.analyzedBy}`);
+
+    // The clinician's case summary is written after the patient has their
+    // answer, so they never wait for it. It is saved as a newer copy of the
+    // entry, which is the one later reads pick up.
+    after(async () => {
+      try {
+        const history = (await getEntries(patientId)).filter((e) => e.date !== date);
+        const caseSummary = await summarizeCase([...history, entry]);
+        await saveEntry({
+          ...entry,
+          id: `${id}-summary`,
+          createdAt: new Date().toISOString(),
+          caseSummary,
+        });
+      } catch (error) {
+        console.error("Writing the case summary failed", error);
+      }
+    });
     return { status: "saved", entry };
   } catch (error) {
     console.error("Saving the assessment failed", error);

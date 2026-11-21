@@ -5,8 +5,8 @@ import { getEntries } from "@/lib/entries";
 import { storageNotice } from "@/lib/notice";
 import { PATIENTS } from "@/lib/patients";
 
-// The analysis runs inside this page's submit action and can take a while.
-export const maxDuration = 60;
+// The agents run inside this page's actions and can take a while.
+export const maxDuration = 300;
 
 export default async function Page() {
   await requireRole("patient");

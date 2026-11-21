@@ -129,7 +129,11 @@ export function AssessmentSheet({
     try {
       result = await submitAssessment(form);
     } catch {
-      result = { status: "error" as const, message: "Could not reach the server. Try again." };
+      result = {
+        status: "error" as const,
+        message:
+          "The request did not come back. If the app was just updated, reload the page and try again; your text is kept below until you do.",
+      };
     }
     setBusy(false);
     if (result.status === "saved") onSaved(result.entry);
