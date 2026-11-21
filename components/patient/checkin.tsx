@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { analyzeCheckin, commitCheckin, removeTodaysCheckin, todaysQuestions } from "@/lib/assessment";
+import { analyzeCheckin, closeCheckinExchange, commitCheckin, reflectOnCheckin, todaysQuestions, type Analysis } from "@/lib/assessment";
+import type { Closing } from "@/lib/agents/reflect-agent";
 import { METRICS, combine, ownKeys, scoredEverything, type Scores } from "@/lib/metrics";
 import type { Entry, QuestionSet } from "@/lib/types";
 import { MeasureRow } from "./measure";
@@ -69,7 +70,10 @@ const pictureOf = (key: string): Picture => ({ key, url: `/api/images?key=${enco
 type Phase =
   | { name: "write" }
   | { name: "working"; step: 1 | 2 }
-  | { name: "recorded"; entry: Entry; concern: boolean };
+  // Her entry is read and nothing is saved yet: the app asks its one question on a bad day...
+  | { name: "asking"; analysis: Analysis; concern: boolean; question: string; madeBy: "claude" | "dummy" }
+  // ...and closes with what it will enter, the recommendation when it has one, and the choices.
+  | { name: "closing"; analysis: Analysis; concern: boolean; question: string | null; answer: string; closing: Closing | null; recommend: boolean };
 
 const big = "flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-lg font-semibold disabled:opacity-50";
 
@@ -77,18 +81,21 @@ const big = "flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl 
  * The one form for today's check-in. Opened fresh it makes the entry; opened
  * again (with `existing`, today's saved entry) it shows what was saved and
  * saving replaces it. Her own scores are picked on the same labelled scale
- * the record is read in.
+ * the record is read in. Nothing is saved until the last screen: on a bad day
+ * after bad days the app asks one question there first, and the last screen
+ * offers to add to the record, or to add and ask the clinic for a check-up.
+ * Removing today's check-in lives on the home page.
  */
 export function Checkin({ existing }: { existing: Entry | null }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ name: "write" });
-  const [saved, setSaved] = useState<Entry | null>(existing);
+  const saved = existing;
   const [questions, setQuestions] = useState<QuestionSet | null | "none">(null);
   const [text, setText] = useState(existing?.text ?? "");
   const [images, setImages] = useState<Picture[]>(() => existing?.images.map(pictureOf) ?? []);
   const [own, setOwn] = useState<Partial<Scores>>(existing?.ownScores ?? {});
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textBox = useGrow(text);
   const [listening, setListening] = useState(false);
@@ -159,9 +166,18 @@ export function Checkin({ existing }: { existing: Entry | null }) {
     return f;
   }
 
+  /** What the exchange screens send to the server: today's words and the scores as read. */
+  const reflection = (analysis: Analysis, extra?: { question: string | null; answer: string }) => ({
+    text,
+    scores: analysis.scores,
+    imageCount: images.length,
+    ...extra,
+  });
+
   async function save() {
     recognition.current?.stop();
     setError(null);
+    setAnswer("");
     setPhase({ name: "working", step: 1 });
     try {
       const read = await analyzeCheckin(form());
@@ -170,18 +186,52 @@ export function Checkin({ existing }: { existing: Entry | null }) {
         setPhase({ name: "write" });
         return;
       }
-      setPhase({ name: "working", step: 2 });
-      const result = await commitCheckin(form({ analysis: JSON.stringify(read.analysis) }));
-      if (result.status !== "saved") {
-        setError(result.message);
-        setPhase({ name: "write" });
+      // Her own picks stand over whatever was read.
+      const scores = { ...read.analysis.scores };
+      for (const key of ownKeys(own)) scores[key] = own[key] ?? null;
+      const analysis = { ...read.analysis, scores };
+      // A correction of what she saved earlier is not a new day: no question again.
+      const asked = saved ? null : await reflectOnCheckin(reflection(analysis));
+      if (asked && asked.status === "ok" && asked.exchange.question) {
+        setPhase({ name: "asking", analysis, concern: read.concern, question: asked.exchange.question, madeBy: asked.exchange.madeBy });
         return;
       }
-      setSaved(result.entry);
-      setPhase({ name: "recorded", entry: result.entry, concern: result.concern });
+      await close(analysis, read.concern, null, "");
     } catch {
       setError("The request did not come back. Your words are still here; try again.");
       setPhase({ name: "write" });
+    }
+  }
+
+  async function close(analysis: Analysis, concern: boolean, question: string | null, said: string) {
+    setPhase({ name: "working", step: 2 });
+    const result = await closeCheckinExchange(reflection(analysis, { question, answer: said }));
+    setPhase({
+      name: "closing",
+      analysis,
+      concern,
+      question,
+      answer: said,
+      closing: result.status === "ok" ? result.closing : null,
+      recommend: result.status === "ok" ? result.closing.recommendation !== null : concern,
+    });
+  }
+
+  /** Enters today in the record; `next` is where she goes from there. */
+  async function enter(phaseNow: Extract<Phase, { name: "closing" }>, next: string) {
+    setError(null);
+    setSaving(true);
+    try {
+      const result = await commitCheckin(form({ analysis: JSON.stringify(phaseNow.analysis), followUpQuestion: phaseNow.question ?? "", followUpAnswer: phaseNow.answer }));
+      if (result.status !== "saved") {
+        setError(result.message);
+        setSaving(false);
+        return;
+      }
+      router.push(next);
+    } catch {
+      setError("The request did not come back. Nothing was saved; try again.");
+      setSaving(false);
     }
   }
 
@@ -225,33 +275,116 @@ export function Checkin({ existing }: { existing: Entry | null }) {
     );
   }
 
-  if (phase.name === "recorded") {
+  if (phase.name === "asking") {
+    const ask = phase;
     return (
-      <Recorded
-        entry={phase.entry}
-        concern={phase.concern}
-        onChange={() => {
-          // The same form again, filled in with what was just saved.
-          setText(phase.entry.text);
-          setImages(phase.entry.images.map(pictureOf));
-          setOwn(phase.entry.ownScores ?? {});
-          setPhase({ name: "write" });
-        }}
-      />
+      <>
+        <h1 className="text-2xl font-semibold">One question</h1>
+        <p className="rounded-2xl border border-accent-soft bg-accent-soft p-4 text-lg font-medium" data-testid="reflect-question">
+          {ask.question}
+        </p>
+        <p className="-mt-2 text-sm text-muted">{ask.madeBy === "claude" ? "Asked by Claude, from your record." : "Asked by the built-in stand-in, from your record, not the AI."} Nothing is saved yet.</p>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Quick answers">
+          <button type="button" onClick={() => setAnswer("I have not done anything different.")} className="min-h-11 rounded-full border border-line bg-surface px-4">
+            Nothing different
+          </button>
+          <button type="button" onClick={() => setAnswer("Yes, something was different: ")} className="min-h-11 rounded-full border border-line bg-surface px-4">
+            Something was different
+          </button>
+        </div>
+        <textarea
+          value={answer}
+          onChange={(event) => setAnswer(event.target.value)}
+          rows={4}
+          aria-label="Your answer"
+          className="w-full rounded-2xl border border-line bg-surface p-3 text-base"
+        />
+        <StickyBar>
+          <button type="button" disabled={!answer.trim()} onClick={() => close(ask.analysis, ask.concern, ask.question, answer.trim())} className={`${big} bg-accent text-accent-ink`}>
+            Answer
+          </button>
+          <button type="button" onClick={() => close(ask.analysis, ask.concern, ask.question, "")} className="min-h-11 text-accent underline underline-offset-2">
+            Skip the question
+          </button>
+        </StickyBar>
+      </>
+    );
+  }
+
+  if (phase.name === "closing") {
+    const done = phase;
+    return (
+      <>
+        <h1 className="text-2xl font-semibold">{saved ? "Save your changes" : "Here is what I will enter"}</h1>
+        {done.closing && <p data-testid="closing-message">{done.closing.message}</p>}
+        {done.recommend && (
+          <section aria-label="A recommendation" className={`rounded-2xl border p-4 ${done.concern ? "border-alert bg-alert-soft" : "border-warn bg-warn-soft"}`} data-testid="recommendation">
+            <p className={`font-semibold ${done.concern ? "text-alert" : ""}`}>{done.concern ? "Please contact the clinic" : "A report to the clinic"}</p>
+            <p className="mt-1">{done.closing?.recommendation ?? "Please contact the clinic about what you wrote. I can prepare a request from your record."}</p>
+            {done.closing && <p className="mt-1 text-xs text-muted">{done.closing.madeBy === "claude" ? "Written by Claude." : "Written by the built-in stand-in, not the AI."}</p>}
+          </section>
+        )}
+        <Card>
+          <div className="divide-y divide-line">
+            {METRICS.map((m) => (
+              <div key={m.key} className="py-1">
+                {done.analysis.scores[m.key] === null ? (
+                  <div className="py-2">
+                    <div className="text-sm text-muted">{m.label}</div>
+                    <div className="text-muted">Not recorded: you did not say.</div>
+                  </div>
+                ) : (
+                  <>
+                    <MeasureRow name={m.key} score={done.analysis.scores[m.key]} />
+                    {ownKeys(own).includes(m.key) && <p className="-mt-1 pb-1 text-sm text-muted">You picked this one.</p>}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 border-t border-line pt-2">
+            <MeasureRow name="combined" score={combine(done.analysis.scores)} />
+          </div>
+        </Card>
+        <p className="text-sm text-muted">
+          {scoredEverything(own)
+            ? "Scored by you."
+            : done.analysis.analyzedBy === "claude"
+              ? `The rest was read by Claude. ${done.analysis.rationale}`
+              : done.analysis.analyzedBy === "dummy"
+                ? "The rest was read by the built-in stand-in, which only counts words; it is not the AI."
+                : "Scored by you."}
+        </p>
+        {error && (
+          <p role="alert" data-testid="checkin-error" className="rounded-xl border border-warn bg-warn-soft p-3 text-warn">
+            {error}
+          </p>
+        )}
+        <StickyBar>
+          {done.recommend ? (
+            <>
+              <button type="button" disabled={saving} onClick={() => enter(done, "/patient/clinic/new?from=suggested")} className={`${big} bg-accent text-accent-ink`}>
+                {saving ? "Saving…" : "Add to my record and request a visit"}
+              </button>
+              <button type="button" disabled={saving} onClick={() => enter(done, "/patient")} className={`${big} border border-line bg-surface`}>
+                Add to my record
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={saving} onClick={() => enter(done, "/patient")} className={`${big} bg-accent text-accent-ink`}>
+              {saving ? "Saving…" : saved ? "Save my changes" : "Add to my record"}
+            </button>
+          )}
+          <button type="button" disabled={saving} onClick={() => setPhase({ name: "write" })} className="min-h-11 text-accent underline underline-offset-2">
+            Change what I wrote
+          </button>
+        </StickyBar>
+      </>
     );
   }
 
   const canSave = text.trim().length > 0 || images.length > 0 || ownKeys(own).length > 0;
 
-  async function remove() {
-    setRemoving(true);
-    setError(null);
-    const result = await removeTodaysCheckin();
-    setRemoving(false);
-    setConfirmRemove(false);
-    if (result.status === "removed") router.push("/patient");
-    else setError(result.message);
-  }
   return (
     <>
       <header className="flex items-center justify-between">
@@ -267,55 +400,37 @@ export function Checkin({ existing }: { existing: Entry | null }) {
         </p>
       )}
 
-      <section aria-labelledby="q-title" className="flex flex-col gap-3">
-        <h2 id="q-title" className="text-lg font-semibold">
-          Things worth thinking about first
-        </h2>
-        {questions === null && (
-          <Card>
-            <p className="text-muted" role="status">
-              Reading your record to find what is worth asking…
-            </p>
-          </Card>
-        )}
-        {questions === "none" && (
-          <Card>
-            <p>How have things been since last time? Take your time.</p>
-          </Card>
-        )}
-        {questions && questions !== "none" && (
-          <>
-            <ul className="flex flex-col gap-3">
-              {questions.questions.map((q) => (
-                <li key={q} className="rounded-2xl border border-accent-soft bg-accent-soft p-4 font-medium">
-                  {q}
-                </li>
-              ))}
-            </ul>
-            <details className="text-sm text-muted">
-              <summary className="min-h-8 cursor-pointer">Why these questions?</summary>
-              <p className="mt-1">{questions.basedOn}</p>
-              <p className="mt-1">{questions.askedBy === "claude" ? "Asked by Claude." : "Asked by the built-in stand-in, not the AI."}</p>
-            </details>
-          </>
-        )}
-      </section>
-
       <section aria-labelledby="say-title" className="flex flex-col gap-3">
         <h2 id="say-title" className="text-lg font-semibold">
-          In your own words
+          How has it been?
         </h2>
-        <p className="text-sm text-muted">
-          Answer as much or as little as you like. Say how the itching, the comfort and getting about have been. You can write, talk, or add a picture.
-        </p>
+        {questions && questions !== "none" ? (
+          <ul className="flex flex-col gap-2" data-testid="todays-questions">
+            {questions.questions.map((q) => (
+              <li key={q} className="rounded-2xl border border-accent-soft bg-accent-soft p-3 text-base">
+                {q}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted">{questions === null ? "Reading your record to find what is worth asking…" : "Take your time: itching, comfort, getting about."}</p>
+        )}
         <textarea
           ref={textBox}
           value={text}
           onChange={(event) => setText(event.target.value)}
-          rows={7}
+          rows={5}
           aria-label="Your notes for today"
+          placeholder="Write, talk, or add a picture. As much or as little as you like."
           className="w-full resize-none overflow-hidden rounded-2xl border border-line bg-surface p-3 text-base"
         />
+        {questions && questions !== "none" && (
+          <details className="text-sm text-muted">
+            <summary className="min-h-8 cursor-pointer">Why these questions?</summary>
+            <p className="mt-1">{questions.basedOn}</p>
+            <p className="mt-1">{questions.askedBy === "claude" ? "Asked by Claude." : "Asked by the built-in stand-in, not the AI."}</p>
+          </details>
+        )}
         {images.length > 0 && (
           <ul className="flex flex-wrap gap-3">
             {images.map((image, i) => (
@@ -347,118 +462,39 @@ export function Checkin({ existing }: { existing: Entry | null }) {
         </div>
       </section>
 
-      <section aria-labelledby="own-title" className="flex flex-col gap-3">
-        <h2 id="own-title" className="text-lg font-semibold">
+      <details open={ownKeys(own).length > 0} aria-labelledby="own-title" className="rounded-2xl border border-line bg-surface p-4" data-testid="own-scores">
+        <summary id="own-title" className="min-h-8 cursor-pointer text-lg font-semibold">
           Or score it yourself
-        </h2>
-        <p className="text-sm text-muted">
+        </summary>
+        <p className="mt-2 text-sm text-muted">
           If you like, say how each one has been. What you pick is what is recorded, and it is marked as yours. Whatever you leave open is read from your words and pictures.
         </p>
-        <Card>
-          <div className="divide-y divide-line">
-            {METRICS.map((m) => (
-              <ScorePicker key={m.key} metric={m} value={own[m.key] ?? null} onChange={(value) => setOwn((current) => ({ ...current, [m.key]: value }))} />
-            ))}
-          </div>
-        </Card>
-      </section>
+        <div className="mt-2 divide-y divide-line">
+          {METRICS.map((m) => (
+            <ScorePicker key={m.key} metric={m} value={own[m.key] ?? null} onChange={(value) => setOwn((current) => ({ ...current, [m.key]: value }))} />
+          ))}
+        </div>
+      </details>
 
       {error && (
         <p role="alert" data-testid="checkin-error" className="rounded-xl border border-warn bg-warn-soft p-3 text-warn">
           {error}
         </p>
       )}
-      <button type="button" onClick={save} disabled={!canSave} className={`${big} bg-accent text-accent-ink`}>
-        {saved ? "Save my changes" : "Save my check-in"}
-      </button>
-      {saved && (
-        <div className="flex flex-col gap-2">
-          {confirmRemove ? (
-            <div role="alertdialog" aria-label="Remove today’s check-in" className="flex flex-col gap-2 rounded-2xl border border-alert bg-alert-soft p-4">
-              <p>Remove today’s check-in? Its words, pictures and scores are taken out of your record and your history, as if you had not checked in today.</p>
-              <div className="flex gap-3">
-                <button type="button" onClick={remove} disabled={removing} className="min-h-12 flex-1 rounded-xl bg-alert px-4 font-semibold text-accent-ink disabled:opacity-50">
-                  {removing ? "Removing…" : "Yes, remove it"}
-                </button>
-                <button type="button" onClick={() => setConfirmRemove(false)} disabled={removing} className="min-h-12 flex-1 rounded-xl border border-line bg-surface px-4 font-semibold">
-                  Keep it
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" onClick={() => setConfirmRemove(true)} className="min-h-12 rounded-xl border border-line bg-surface px-4 font-medium text-alert">
-              Remove today’s check-in
-            </button>
-          )}
-        </div>
-      )}
+      <StickyBar>
+        <button type="button" onClick={save} disabled={!canSave} className={`${big} bg-accent text-accent-ink`}>
+          {saved ? "Continue with my changes" : "Continue"}
+        </button>
+      </StickyBar>
     </>
   );
 }
 
-function Recorded({ entry, concern, onChange }: { entry: Entry; concern: boolean; onChange: () => void }) {
-  const router = useRouter();
-  const own = ownKeys(entry.ownScores);
-  const everything = scoredEverything(entry.ownScores);
-
+/** The action of a screen, kept at the foot of the screen so it is never scrolled past. */
+function StickyBar({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <h1 className="text-2xl font-semibold">Saved. Here is what I recorded</h1>
-      <p className="text-muted">
-        {everything ? "You scored all three yourself, so this is exactly what you picked." : "This is how I read what you said, with what you picked yourself. If something is wrong, change it."}
-      </p>
-
-      {concern && (
-        <Card className="border-alert bg-alert-soft">
-          <p className="font-semibold text-alert">Please contact the clinic</p>
-          <p className="mt-1">
-            You mentioned something that could be a wound or a sign of infection. That is for the clinic to look at; it is not something to treat at home. I can prepare a request from what you wrote.
-          </p>
-          <Link href="/patient/clinic/new" className="mt-3 flex min-h-12 items-center justify-center rounded-xl bg-alert px-4 font-semibold text-accent-ink">
-            Ask for a check-up now
-          </Link>
-        </Card>
-      )}
-
-      <Card>
-        <div className="divide-y divide-line">
-          {METRICS.map((m) => (
-            <div key={m.key} className="py-1">
-              {entry.scores[m.key] === null ? (
-                <div className="py-2">
-                  <div className="text-sm text-muted">{m.label}</div>
-                  <div className="text-muted">Not recorded: you did not say. Change the check-in to add it.</div>
-                </div>
-              ) : (
-                <>
-                  <MeasureRow name={m.key} score={entry.scores[m.key]} />
-                  {own.includes(m.key) && <p className="-mt-1 pb-1 text-sm text-muted">You picked this one.</p>}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 border-t border-line pt-2">
-          <MeasureRow name="combined" score={combine(entry.scores)} />
-          <p className="text-sm text-muted">Put together from the three above.</p>
-        </div>
-      </Card>
-
-      <p className="text-sm text-muted">
-        {everything
-          ? "Scored by you."
-          : entry.analyzedBy === "claude"
-            ? `The rest was read by Claude. ${entry.rationale}`
-            : entry.analyzedBy === "dummy"
-              ? "The rest was read by the built-in stand-in, which only counts words; it is not the AI."
-              : "Scored by you."}
-      </p>
-      <button type="button" onClick={() => router.push("/patient")} className={`${big} bg-accent text-accent-ink`}>
-        That looks right
-      </button>
-      <button type="button" onClick={onChange} className={`${big} border border-line bg-surface`}>
-        Change this check-in
-      </button>
-    </>
+    <div className="sticky bottom-0 -mx-4 mt-auto flex flex-col items-stretch gap-2 border-t border-line bg-page/95 px-4 pb-4 pt-3 backdrop-blur">
+      {children}
+    </div>
   );
 }

@@ -1,3 +1,4 @@
+import { Focused } from "@/components/patient/focused";
 import { RequestEditor } from "@/components/patient/request-editor";
 import { getEntries } from "@/lib/entries";
 import { PATIENTS } from "@/lib/patients";
@@ -13,5 +14,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ f
     .flatMap((e) => e.images.map((key) => ({ key, date: e.date })))
     .reverse()
     .slice(0, 12);
-  return <RequestEditor raisedBy={from === "suggested" ? "suggested" : "patient"} pictures={pictures} />;
+  return (
+    <Focused>
+      <RequestEditor raisedBy={from === "suggested" ? "suggested" : "patient"} pictures={pictures} />
+    </Focused>
+  );
 }

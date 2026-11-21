@@ -61,6 +61,14 @@ export default async function Page({ params }: { params: Promise<{ id: string; r
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">{request.headline}</h1>
             <Badge tone={request.status === "sent" ? "accent" : "neutral"}>{STATUS[request.status]}</Badge>
+            <a
+              href={`/api/request-pdf?patient=${patient.id}&id=${request.id}`}
+              download
+              data-testid="request-pdf"
+              className="ml-auto inline-flex min-h-10 items-center rounded-xl border border-line bg-surface px-4 text-sm font-medium hover:bg-page"
+            >
+              Download as PDF
+            </a>
           </div>
           <p className="text-sm text-muted">
             <Link href={`/doctor/patients/${patient.id}`} className="text-accent hover:underline">

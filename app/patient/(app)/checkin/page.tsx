@@ -1,3 +1,4 @@
+import { Focused } from "@/components/patient/focused";
 import { Checkin } from "@/components/patient/checkin";
 import { today } from "@/lib/dates";
 import { getEntries } from "@/lib/entries";
@@ -11,5 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function Page() {
   const date = today();
   const existing = (await getEntries(PATIENTS[0].id)).find((e) => e.date === date && e.analyzedBy !== "seed") ?? null;
-  return <Checkin existing={existing} />;
+  return (
+    <Focused>
+      <Checkin existing={existing} />
+    </Focused>
+  );
 }

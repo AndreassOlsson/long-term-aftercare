@@ -6,37 +6,6 @@ import { Card } from "@/components/ui/card";
 import { loadSuggestions } from "@/lib/assessment";
 import { formatDate } from "@/lib/dates";
 import type { SuggestionSet } from "@/lib/suggestions";
-import { seenAnswers } from "./seen";
-
-const primary =
-  "flex min-h-14 w-full items-center justify-center rounded-2xl bg-accent px-5 py-3 text-lg font-semibold text-accent-ink hover:opacity-90";
-
-export type MainChoice = { label: string; hint: string; href: string };
-
-/** The one thing to do now. A fresh answer from the clinic comes before a new check-in. */
-export function MainAction({
-  answered,
-  fallback,
-}: {
-  answered: { id: string; updatedAt: string; headline: string }[];
-  fallback: MainChoice;
-}) {
-  const [choice, setChoice] = useState<MainChoice>(fallback);
-  useEffect(() => {
-    const seen = seenAnswers();
-    const fresh = answered.find((a) => seen[a.id] !== a.updatedAt);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- what was already read is only known in the browser
-    setChoice(fresh ? { label: "Read the clinic's answer", hint: fresh.headline, href: `/patient/clinic/${fresh.id}` } : fallback);
-  }, [answered, fallback]);
-  return (
-    <div className="flex flex-col gap-2">
-      <Link href={choice.href} className={primary}>
-        {choice.label}
-      </Link>
-      <p className="text-center text-sm text-muted">{choice.hint}</p>
-    </div>
-  );
-}
 
 function DayLinks({ dates }: { dates: string[] }) {
   if (dates.length === 0) return null;
@@ -46,7 +15,7 @@ function DayLinks({ dates }: { dates: string[] }) {
       {dates.map((d, i) => (
         <span key={d}>
           {i > 0 && ", "}
-          <Link href={`/patient/history?day=${d}`} className="text-accent underline underline-offset-2">
+          <Link href={`/patient?day=${d}#history`} className="text-accent underline underline-offset-2">
             {formatDate(d)}
           </Link>
         </span>
@@ -69,7 +38,7 @@ export function Suggestions() {
 
   return (
     <section aria-labelledby="things-title" className="flex flex-col gap-3">
-      <h2 id="things-title" className="text-xl font-semibold">
+      <h2 id="things-title" className="sr-only">
         Things you can do
       </h2>
       {set === null && (
@@ -121,24 +90,3 @@ export function Suggestions() {
     </section>
   );
 }
-
-export function Sparkline({ points }: { points: (number | null)[] }) {
-  const values = points.filter((p): p is number => p !== null);
-  if (values.length < 2) return null;
-  const w = 320;
-  const h = 56;
-  const step = w / (points.length - 1);
-  let d = "";
-  points.forEach((p, i) => {
-    if (p === null) return;
-    const y = h - 6 - ((p - 1) / 4) * (h - 12);
-    d += `${d ? "L" : "M"}${(i * step).toFixed(1)},${y.toFixed(1)}`;
-  });
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-14 w-full" role="img" aria-label="How well it has been working over the last eight weeks, better is higher">
-      <path d={`M0,${h - 6 - 0.5 * (h - 12)}H${w}`} stroke="var(--color-line)" strokeDasharray="3 4" fill="none" />
-      <path d={d} fill="none" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-

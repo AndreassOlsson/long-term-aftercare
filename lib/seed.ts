@@ -35,12 +35,18 @@ const NOTES: Record<number, string> = {
   1: "Still sore. I think the fit has changed, it feels looser than before.",
 };
 
-const PICTURES: Record<number, string> = {
-  1090: "seed-fit",
-  12: "seed-mark",
-  5: "seed-rub",
-  1: "seed-sore",
-};
+/**
+ * His three photos, reused along the timeline: the healthy one through the
+ * long good stretch (about every fourth check-in), the medium one as things
+ * begin to slide, the unhealthy one in the bad weeks. Each day gets its own
+ * key (`seed-<look>-<days ago>`), so a day's picture is its own in the record;
+ * /api/images maps every such key to the one photo of that look.
+ */
+export function seedPicture(ago: number, index: number): "healthy" | "medium" | "unhealthy" | null {
+  if (ago >= 28) return index % 4 === 0 ? "healthy" : null;
+  if (ago >= 14) return index % 2 === 0 ? "medium" : null;
+  return index % 2 === 1 ? "unhealthy" : null;
+}
 
 /** The days she checked in: about weekly, and more often once things slide. */
 function checkInDays(): number[] {
@@ -58,7 +64,7 @@ function checkInDays(): number[] {
 export function seedEntries(patientId: string): Entry[] {
   const end = today();
   const entries: Entry[] = [];
-  for (const ago of checkInDays()) {
+  for (const [index, ago] of checkInDays().entries()) {
     // Day-to-day noise from a fixed hash (never random) plus a slow swell, so the line reads as a life.
     const noise = (phase: number) => ((Math.sin((ago + phase) * 12.9898) * 43758.5453) % 1 + 1) % 1 - 0.5;
     const wobble = (phase: number) => noise(phase) * 0.5 + Math.sin(ago * 0.06 + phase) * 0.25;
@@ -71,14 +77,14 @@ export function seedEntries(patientId: string): Entry[] {
       mobility: clampScore(4.0 - (ago > 900 ? 0.4 : 0) - decline * 1.8 + wobble(4)),
     };
     const date = addDays(end, -ago);
-    const picture = PICTURES[ago];
+    const look = seedPicture(ago, index);
     entries.push({
       id: `seed-${date}`,
       patientId,
       date,
       createdAt: `${date}T18:00:00.000Z`,
       text: NOTES[ago] ?? "",
-      images: picture ? [`patients/${patientId}/images/${picture}.jpg`] : [],
+      images: look ? [`patients/${patientId}/images/seed-${look}-${ago}.jpg`] : [],
       scores,
       combined: combine(scores),
       rationale: "",

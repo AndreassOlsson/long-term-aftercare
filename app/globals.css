@@ -25,3 +25,9 @@ body {
   background: var(--color-page);
   color: var(--color-ink);
 }
+
+/* The patient's pages: the document is the one scroller and it snaps, one
+   section per stop (components/patient/pager.tsx). */
+html.pager {
+  scroll-snap-type: y mandatory;
+}

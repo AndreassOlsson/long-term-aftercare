@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Focused } from "@/components/patient/focused";
 import { MarkSeen } from "@/components/patient/mark-seen";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/dates";
@@ -26,9 +27,9 @@ export default async function Page({
   const reply = request.reply;
 
   return (
-    <>
+    <Focused>
       {reply && <MarkSeen id={request.id} updatedAt={request.updatedAt} />}
-      <Link href="/patient/clinic" className="min-h-11 content-center text-accent underline underline-offset-2">
+      <Link href="/patient#clinic" className="min-h-11 content-center text-accent underline underline-offset-2">
         ← The clinic
       </Link>
       {sent && (
@@ -37,6 +38,14 @@ export default async function Page({
         </p>
       )}
       <h1 className="text-2xl font-semibold leading-snug">{request.headline}</h1>
+      <a
+        href={`/api/request-pdf?id=${request.id}`}
+        download
+        data-testid="request-pdf"
+        className="flex min-h-12 items-center justify-center rounded-xl border border-line bg-surface px-4 font-medium"
+      >
+        Download as PDF
+      </a>
 
       <Card title="Where it stands">
         <ol className="flex flex-col gap-3">
@@ -73,7 +82,7 @@ export default async function Page({
             {request.evidenceDates.map((d, i) => (
               <span key={d}>
                 {i > 0 && ", "}
-                <Link href={`/patient/history?day=${d}`} className="text-accent underline underline-offset-2">
+                <Link href={`/patient?day=${d}#history`} className="text-accent underline underline-offset-2">
                   {formatDate(d)}
                 </Link>
               </span>
@@ -89,6 +98,6 @@ export default async function Page({
           </div>
         )}
       </Card>
-    </>
+    </Focused>
   );
 }
