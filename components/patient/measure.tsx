@@ -12,12 +12,13 @@ export function Steps({ score }: { score: number | null }) {
   );
 }
 
-export function MeasureRow({ name, score }: { name: MetricKey | "combined"; score: number | null }) {
+export function MeasureRow({ name, score, own = false }: { name: MetricKey | "combined"; score: number | null; own?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2">
       <div>
         <div className="text-sm text-muted">{labelFor(name)}</div>
         <div className="font-medium">{wordFor(name, score)}</div>
+        {own && <div className="text-sm text-muted">You picked this</div>}
       </div>
       <Steps score={score} />
     </div>

@@ -89,6 +89,14 @@ export default async function Home() {
         fallback={fallback}
       />
 
+      {state.daysSinceLast === 0 && (
+        <p className="text-center text-sm">
+          <Link href="/patient/checkin" className="text-accent underline underline-offset-2">
+            Change or remove today’s check-in
+          </Link>
+        </p>
+      )}
+
       {proposed && !concern && (
         <Card className="border-warn bg-warn-soft">
           <h2 className="font-semibold">Your record shows a change</h2>

@@ -1,7 +1,7 @@
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { BetaContentBlockParam } from "@anthropic-ai/sdk/resources/beta";
 import { z } from "zod";
-import { METRICS, clampScore, emptyScores, missingMetrics, type Scores } from "../metrics";
+import { METRICS, clampScore, emptyScores, missingMetrics, ownKeys, type Scores } from "../metrics";
 import { hasKey, runAgent } from "./run";
 import { metricGuide, recordTools } from "./tools";
 
@@ -23,6 +23,8 @@ export type AnalysisInput = {
   questions: string[];
   /** Set on the second pass, when the patient has answered or skipped. */
   followUp: { question: string; answer: string | null } | null;
+  /** Scores the patient picked herself. They stand as picked; the analysis only fills in the rest. */
+  ownScores?: Partial<Scores>;
   /** The check-in screen shows what could not be read and lets the patient add it, so no follow-up is asked. */
   noFollowUp?: boolean;
 };
@@ -42,6 +44,8 @@ ${metricGuide}
 
 Score a metric only when today's text or a picture actually says something about it. If today's entry gives you nothing to go on for a metric, leave it null: a gap in the timeline is better than a guess, because the clinician reads these numbers as the patient's own report.
 
+The patient may have scored some measures herself. Her score is final for that measure: copy it unchanged into record_metrics and read only the other measures from her words and pictures. Never ask about a measure she scored.
+
 Patients often speak relatively ("worse than yesterday", "same as last week", "the rubbing is back"). You can look up their earlier datapoints and entries with the tools to anchor such statements to what the record says; a quick look at the last few days is usually enough, and for a plain, absolute entry you may not need to look at all.
 
 When you are done, call record_metrics exactly once. Its fields:
@@ -59,6 +63,12 @@ async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisResult> 
   const parts = [`Today is ${input.date}.`];
   if (input.questions.length) {
     parts.push(`Before writing, the patient was shown these questions:\n${input.questions.map((q) => `- ${q}`).join("\n")}`);
+  }
+  const own = ownKeys(input.ownScores);
+  if (own.length) {
+    parts.push(
+      `The patient scored these measures herself, and her scores stand: ${own.map((k) => `${k} ${input.ownScores?.[k]}`).join(", ")}. Record them unchanged and read only the rest.`,
+    );
   }
   parts.push(`Today's entry from the patient:\n\n${input.text.trim() || "(no text, pictures only)"}`);
   if (input.followUp) {
@@ -120,16 +130,18 @@ const NEGATIVE = ["bad", "worse", "worst", "very", "a lot", "terrible", "hard", 
 /** Crude stand-in: finds sentences that mention a metric and counts good and bad words in them. */
 function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
   const text = `${input.text} ${input.followUp?.answer ?? ""}`.toLowerCase();
+  const own = ownKeys(input.ownScores);
   const sentences = text.split(/[.!?\n]+/).filter((s) => s.trim());
   const scores = emptyScores();
   for (const m of METRICS) {
+    if (own.includes(m.key)) continue;
     const about = sentences.filter((s) => m.keywords.some((k) => s.includes(k)));
     if (about.length === 0) continue;
     const joined = about.join(" ");
     const count = (words: string[]) => words.filter((w) => joined.includes(w)).length;
     scores[m.key] = clampScore(3 + count(POSITIVE) - count(NEGATIVE));
   }
-  const missing = missingMetrics(scores);
+  const missing = missingMetrics(scores).filter((m) => !own.includes(m.key));
   return {
     scores,
     rationale: "Scored by the built-in keyword stand-in, not by the AI analysis.",
@@ -141,13 +153,24 @@ function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
   };
 }
 
+/**
+ * Her own scores replace whatever the analysis said for those measures, however
+ * the analysis was made, and nothing is asked about a measure she scored.
+ */
+function withOwnScores(result: AnalysisResult, input: AnalysisInput): AnalysisResult {
+  const scores = { ...result.scores };
+  for (const key of ownKeys(input.ownScores)) scores[key] = input.ownScores?.[key] ?? null;
+  const stillMissing = missingMetrics(scores).length > 0;
+  return { ...result, scores, followUpQuestion: stillMissing ? result.followUpQuestion : null };
+}
+
 export async function analyze(input: AnalysisInput): Promise<AnalysisResult> {
   if (hasKey()) {
     try {
-      return await analyzeWithClaude(input);
+      return withOwnScores(await analyzeWithClaude(input), input);
     } catch (error) {
       console.error("Metrics agent failed, using the keyword stand-in", error);
     }
   }
-  return analyzeWithKeywords(input);
+  return withOwnScores(analyzeWithKeywords(input), input);
 }

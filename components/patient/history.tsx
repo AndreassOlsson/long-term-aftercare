@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { addDays } from "@/lib/dates";
-import { COMBINED, METRICS, type MetricKey } from "@/lib/metrics";
+import { COMBINED, METRICS, ownKeys, scoredEverything, type MetricKey } from "@/lib/metrics";
 import type { Entry } from "@/lib/types";
 import { MeasureRow } from "./measure";
 
@@ -349,7 +349,7 @@ export function History({ entries, initialDay }: { entries: Entry[]; initialDay:
           <div className="mt-2 divide-y divide-line">
             <MeasureRow name="combined" score={selectedEntry.combined} />
             {METRICS.map((m) => (
-              <MeasureRow key={m.key} name={m.key as MetricKey} score={selectedEntry.scores[m.key]} />
+              <MeasureRow key={m.key} name={m.key as MetricKey} score={selectedEntry.scores[m.key]} own={selectedEntry.ownScores?.[m.key] != null} />
             ))}
           </div>
           <h3 className="mt-3 text-sm font-medium text-muted">What you wrote</h3>
@@ -374,8 +374,11 @@ export function History({ entries, initialDay }: { entries: Entry[]; initialDay:
           )}
           {selectedEntry.analyzedBy !== "seed" && (
             <p className="mt-3 text-xs text-muted">
-              {selectedEntry.analyzedBy === "claude" ? "Read by Claude" : "Read by the built-in stand-in, not the AI"}
-              {selectedEntry.corrected ? ", then corrected by you." : "."}
+              {scoredEverything(selectedEntry.ownScores)
+                ? "Scored by you."
+                : selectedEntry.analyzedBy === "claude"
+                  ? `Read by Claude${ownKeys(selectedEntry.ownScores).length ? ", apart from what you picked yourself." : "."}`
+                  : `Read by the built-in stand-in, not the AI${ownKeys(selectedEntry.ownScores).length ? ", apart from what you picked yourself." : "."}`}
             </p>
           )}
           <p className="mt-3 text-sm">

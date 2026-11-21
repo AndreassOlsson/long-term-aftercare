@@ -1,6 +1,6 @@
 import { readMetrics } from "./metrics-csv";
 import { SEED_SUMMARY, seedEntries } from "./seed";
-import { getObject, listKeys, putObject } from "./storage";
+import { deleteObject, getObject, listKeys, putObject } from "./storage";
 import type { Entry, QuestionSet } from "./types";
 
 // What the patient entered (text, pictures, the questions they were shown)
@@ -26,8 +26,12 @@ const byCreated = <T extends { createdAt: string }>(items: T[]) =>
 export async function getEntries(patientId: string): Promise<Entry[]> {
   const notes = new Map<string, Entry>();
   for (const entry of seedEntries(patientId)) notes.set(entry.date, entry);
-  // Later saves for the same day win.
-  for (const entry of byCreated(await readAll<Entry>(entryPrefix(patientId)))) {
+  // Later saves for the same day win; the copy carrying the case summary
+  // shares its entry's createdAt and goes after it.
+  const saved = (await readAll<Entry>(entryPrefix(patientId))).sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || Number(!!a.caseSummary) - Number(!!b.caseSummary),
+  );
+  for (const entry of saved) {
     notes.set(entry.date, entry);
   }
   return (await readMetrics(patientId)).map((row) => {
@@ -58,6 +62,19 @@ export async function saveEntry(entry: Entry): Promise<void> {
     JSON.stringify(entry, null, 2),
     "application/json",
   );
+}
+
+/**
+ * Removes the stored files of one day's entry (every save and summary copy),
+ * except one file when `exceptName` is given: the save that replaces them.
+ */
+export async function deleteEntryFiles(patientId: string, date: string, exceptName?: string): Promise<void> {
+  const prefix = entryPrefix(patientId);
+  const keys = (await listKeys(prefix)).filter((key) => {
+    const name = key.slice(prefix.length);
+    return name.startsWith(`${date}-`) && name !== exceptName;
+  });
+  await Promise.all(keys.map((key) => deleteObject(key)));
 }
 
 export function latestSummary(entries: Entry[]): string {

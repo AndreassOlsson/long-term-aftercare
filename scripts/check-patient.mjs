@@ -1,8 +1,14 @@
 // Drives the built app in a phone-sized browser through the patient's side:
-// login, a check-in with text and a picture, the recorded measures and one
-// correction, a suggestion with its reason, a request prepared, edited and
-// sent, and that request present in the record. Also: an entry of two random
-// letters is not saved. Exits non-zero on any failure.
+// login, a check-in with text, a picture and one measure scored by the patient
+// (saved exactly as picked, marked as hers, not changed by the analysis),
+// reopening today's check-in (what was saved is shown; removing the picture and
+// changing a score replaces the entry; a picture key from another day is
+// refused), a check-in of scores alone, every measure scored (no follow-up),
+// removing today's check-in (gone from the record and the graph), a suggestion
+// with its reason, a request prepared, edited and sent, and the demo reset.
+// Also: an entry of two random letters is not saved, and a fresh start and the
+// state after the reset both show today as not yet reported. Exits non-zero on
+// any failure.
 //
 //   npm run build && node scripts/check-patient.mjs
 //
@@ -108,6 +114,28 @@ const shot = async (name) => {
   await page.screenshot({ path: path.join(screens, `${name}.png`), fullPage: true });
 };
 const state = async () => (await context.request.get(`${base}/patient/api/state`)).json();
+/** The picked step for one measure, by the word on the button, e.g. pick("itchiness", 5). */
+const pick = (measure, step) => page.locator(`button[data-measure=${measure}][data-step="${step}"]`).click();
+// One save can be made to carry a picture key from another day, to prove it is refused.
+let injectKey = null;
+let injectLeft = 0; // the key goes into both steps of the save
+await page.route("**/patient/checkin", async (route) => {
+  const request = route.request();
+  const type = request.headers()["content-type"] ?? "";
+  const body = request.postDataBuffer();
+  if (!injectKey || request.method() !== "POST" || !type.startsWith("multipart/form-data") || !body) return route.continue();
+  const text = body.toString("latin1");
+  const prefix = text.match(/name="((?:_?\d+_)?)keepImages"|name="((?:_?\d+_)?)text"/);
+  const name = prefix?.[1] ?? prefix?.[2];
+  // Only the save itself (it carries the text field), not the question lookup.
+  if (name === undefined) return route.continue();
+  const boundary = type.split("boundary=")[1];
+  const part = `--${boundary}\r\nContent-Disposition: form-data; name="${name}keepImages"\r\n\r\n${injectKey}\r\n`;
+  const at = body.lastIndexOf(Buffer.from(`--${boundary}--`));
+  injectLeft -= 1;
+  if (injectLeft === 0) injectKey = null;
+  return route.continue({ postData: Buffer.concat([body.subarray(0, at), Buffer.from(part), body.subarray(at)]) });
+});
 
 try {
   // 1. login
@@ -129,6 +157,7 @@ try {
   check("home never shows a bare score label like 'Itchiness 5'", !/(Itchiness|Comfort|Mobility)\s+\d/.test(homeText));
   await shot("02-home");
   const before = await state();
+  check("a fresh start shows today as not yet reported", !before.dates.includes(before.today) && before.entries.length === 0 && !/checked in today/i.test(homeText), JSON.stringify({ today: before.today, last: before.dates.at(-1) }));
 
   // 3. an entry that says nothing is never saved
   await page.goto(`${base}/patient/checkin`);
@@ -144,34 +173,117 @@ try {
   check("two random letters are not in the record", afterNoise.entries.length === before.entries.length && afterNoise.entryCount === before.entryCount, JSON.stringify(afterNoise.entries));
   await shot("04-checkin-nothing-saved");
 
-  // 4. a real check-in: text and a picture
+  // 4. a real check-in: text, a picture and one measure scored by the patient herself
   await page.getByLabel("Your notes for today").fill(
     "Itching under the liner after a long walk this afternoon, quite a lot of it. It is sore where it rubs and uncomfortable to wear. I walked less than usual and took the stairs slowly.",
   );
   await page.getByTestId("picture-input").setInputFiles({ name: "skin.png", mimeType: "image/png", buffer: png(96, 72, [214, 160, 140]) });
   await page.getByAltText("Your picture 1").waitFor();
+  // The scale is words, never a number: the step is picked by its word, and the word is shown.
+  await page.getByRole("button", { name: "No itching" }).click();
+  check("her pick is shown as a word, not a number", /No itching/.test(await page.getByTestId("picked-itchiness").innerText()));
+  await page.getByTestId("picked-itchiness").scrollIntoViewIfNeeded();
   await shot("05-checkin-written");
+  await page.locator("section[aria-labelledby=own-title]").screenshot({ path: path.join(screens, "05b-scoring-part.png") });
   await page.getByRole("button", { name: "Save my check-in" }).click();
   await page.getByText("Working on it").waitFor();
   await shot("06-checkin-working");
-  await page.getByText("Saved. Here is what I recorded").waitFor();
+  await page.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
   const recorded = await page.locator("body").innerText();
   check("the recorded measures are shown in words", /(No itching|Hardly any itching|Some itching|A lot of itching|Severe itching)/.test(recorded) && /Itchiness/.test(recorded));
   check("no bare numbers for the measures", !/(Itchiness|Comfort|Perceived mobility)\s*\n?\s*[1-5](\.\d)?\s*(\/|of)/.test(recorded));
+  check("the recorded screen marks the figure she picked", /You picked this one/.test(recorded));
   await shot("07-checkin-recorded");
   const saved = await state();
   const entry = saved.entries.at(-1);
   check("the check-in is in the record with its words and picture", saved.entries.length === before.entries.length + 1 && entry?.images.length === 1 && /Itching/.test(entry.text), JSON.stringify(entry));
-  const comfortBefore = entry?.scores.comfort;
+  check(
+    "the measure she scored is saved exactly as she picked it, marked as hers, and the analysis did not change it",
+    entry?.scores.itchiness === 5 && entry.ownScores?.itchiness === 5 && Object.keys(entry.ownScores).length === 1 && entry.scores.comfort !== null,
+    JSON.stringify({ scores: entry?.scores, own: entry?.ownScores }),
+  );
 
-  // 5. correct one measure
-  await page.getByRole("button", { name: "Change" }).nth(1).click();
-  await shot("08-checkin-correcting");
-  await page.getByRole("button", { name: /^Completely comfortable/ }).click();
+  // 5. reopen today's check-in: it shows what was saved
+  await page.getByRole("button", { name: "Change this check-in" }).click();
+  await page.getByAltText("Your picture 1").waitFor();
+  const reopened = await page.getByLabel("Your notes for today").inputValue();
+  check("the saved text is shown again", reopened === entry.text, reopened.slice(0, 60));
+  check("the saved picture is shown again", (await page.getByAltText(/Your picture/).count()) === 1);
+  check("the saved score is shown again", /No itching/.test(await page.getByTestId("picked-itchiness").innerText()));
+  await shot("08-checkin-reopened");
+  await page.goto(`${base}/patient/checkin`);
+  await page.getByAltText("Your picture 1").waitFor();
+  check("opening it from the start shows the same", (await page.getByLabel("Your notes for today").inputValue()) === entry.text && /No itching/.test(await page.getByTestId("picked-itchiness").innerText()));
+
+  // 5b. take the picture out, change a score, try to slip in a picture from another day, save
+  await page.getByRole("button", { name: "Remove picture 1" }).click();
+  await pick("comfort", 4);
+  injectKey = "patients/maria/images/seed-fit.jpg";
+  injectLeft = 2;
   await page.getByRole("button", { name: "Save my changes" }).click();
+  await page.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
+  check("the foreign picture key was sent with both steps of the save", injectLeft === 0);
+  const replaced = await state();
+  const entry2 = replaced.entries.at(-1);
+  check(
+    "saving replaced today's entry: one entry for today, no picture, comfort as picked, the earlier pick kept",
+    replaced.entries.length === saved.entries.length && entry2.images.length === 0 && entry2.scores.comfort === 4 && entry2.ownScores.comfort === 4 && entry2.ownScores.itchiness === 5 && entry2.text === entry.text,
+    JSON.stringify(entry2),
+  );
+  check("a picture key from another day is refused", !entry2.images.includes("patients/maria/images/seed-fit.jpg"), JSON.stringify(entry2.images));
+
+  // 5c. every measure scored: no follow-up is asked, nothing is flagged as missing
+  await page.getByRole("button", { name: "Change this check-in" }).click();
+  await pick("mobility", 3);
+  await shot("08b-checkin-all-scored");
+  await page.getByRole("button", { name: "Save my changes" }).click();
+  await page.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
+  const all = await page.locator("body").innerText();
+  const entry3 = (await state()).entries.at(-1);
+  check(
+    "with every measure scored nothing is asked and nothing is flagged missing",
+    Object.keys(entry3.ownScores).length === 3 && /Scored by you/.test(all) && !/One more thing|Not recorded/.test(all) && entry3.scores.itchiness === 5 && entry3.scores.comfort === 4 && entry3.scores.mobility === 3,
+    JSON.stringify(entry3),
+  );
+  await shot("08c-recorded-all-scored");
+
+  // 5d. remove today's check-in: it leaves the record and the graph
+  const withToday = await state();
+  await page.getByRole("button", { name: "Change this check-in" }).click();
+  await page.getByRole("button", { name: "Remove today’s check-in" }).click();
+  await shot("08d-remove-confirm");
+  await page.getByRole("button", { name: "Yes, remove it" }).click();
   await page.waitForURL(`${base}/patient`);
-  const corrected = (await state()).entries.at(-1);
-  check("one measure was corrected and saved", corrected?.scores.comfort === 5 && comfortBefore !== 5 && corrected.corrected === true, `before ${comfortBefore}, after ${corrected?.scores.comfort}`);
+  const removed = await state();
+  check(
+    "removing today's check-in takes it out of the record",
+    withToday.dates.includes(withToday.today) && !removed.dates.includes(removed.today) && removed.entries.length === before.entries.length,
+    JSON.stringify({ was: withToday.dates.at(-1), now: removed.dates.at(-1) }),
+  );
+  check("and home reads as not yet reported", !/checked in today/i.test(await page.locator("body").innerText()) && (await page.getByRole("link", { name: "Check in" }).count()) >= 1);
+  await page.goto(`${base}/patient/history`);
+  await page.getByRole("img", { name: /How well your prosthesis has been working/ }).waitFor();
+  const graphText = await page.locator("body").innerText();
+  const todayLabel = new Date(`${removed.today}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+  check("and the history and its graph end the day before", !graphText.includes(todayLabel), todayLabel);
+  check("the graph names its scale and has dates along it", /Severe|Painful|Hardly getting about/.test(await page.locator("svg[role=img]").first().innerHTML()) && (await page.locator("svg[role=img] text").count()) > 6);
+
+  // 5e. a check-in of scores alone saves
+  await page.goto(`${base}/patient/checkin`);
+  await page.getByText("Things worth thinking about first").waitFor();
+  check("the button is off while there is nothing to save", await page.getByRole("button", { name: "Save my check-in" }).isDisabled());
+  await pick("comfort", 2);
+  await shot("08e-scores-alone");
+  await page.getByRole("button", { name: "Save my check-in" }).click();
+  await page.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
+  const scoresOnly = (await state()).entries.at(-1);
+  check(
+    "a check-in of scores alone is saved, as hers",
+    scoresOnly.text === "" && scoresOnly.images.length === 0 && scoresOnly.scores.comfort === 2 && scoresOnly.ownScores.comfort === 2 && scoresOnly.scores.itchiness === null,
+    JSON.stringify(scoresOnly),
+  );
+  await page.getByRole("button", { name: "That looks right" }).click();
+  await page.waitForURL(`${base}/patient`);
 
   // 6. suggestions after the check-in
   await page.getByText("Why:").first().waitFor();
@@ -221,6 +333,24 @@ try {
   await page.goto(`${base}/patient/settings`);
   await page.getByText("Who reads your words").waitFor();
   await shot("18-settings");
+  // 9. the demo reset: the clinician's reset puts today back to not yet reported
+  const doctorContext = await browser.newContext();
+  const doctorPage = await doctorContext.newPage();
+  await doctorPage.goto(`${base}/doctor/login`);
+  await doctorPage.fill('input[name="password"]', process.env.DOCTOR_PASSWORD ?? env.DOCTOR_PASSWORD);
+  await doctorPage.click('button:has-text("Log in")');
+  await doctorPage.waitForURL(`${base}/doctor`);
+  const reset = await doctorContext.request.post(`${base}/api/demo/reset`);
+  check("the reset ran", reset.ok());
+  const afterReset = await state();
+  await page.goto(`${base}/patient`);
+  await page.getByRole("link", { name: "Check in" }).first().waitFor();
+  check(
+    "after the reset today is not yet reported, and the first thing offered is a new check-in",
+    !afterReset.dates.includes(afterReset.today) && afterReset.entries.length === 0 && !/checked in today/i.test(await page.locator("body").innerText()),
+    JSON.stringify({ today: afterReset.today, last: afterReset.dates.at(-1) }),
+  );
+  await doctorContext.close();
 } catch (error) {
   fail("the run", String(error?.stack ?? error));
   await shot("zz-failure").catch(() => {});

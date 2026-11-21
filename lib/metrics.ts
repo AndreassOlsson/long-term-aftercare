@@ -52,6 +52,22 @@ export function combine(scores: Scores): number | null {
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
 
+/** Her picks, cleaned: only whole numbers from 1 to 5 survive. */
+export function cleanOwnScores(raw: Partial<Record<MetricKey, unknown>>): Partial<Scores> {
+  const own: Partial<Scores> = {};
+  for (const m of METRICS) {
+    const value = raw[m.key];
+    if (typeof value === "number" && Number.isInteger(value) && value >= SCORE_MIN && value <= SCORE_MAX) own[m.key] = value;
+  }
+  return own;
+}
+
+export const ownKeys = (own: Partial<Scores> | undefined) =>
+  METRICS.filter((m) => own?.[m.key] != null).map((m) => m.key);
+
+/** True when she picked every measure. */
+export const scoredEverything = (own: Partial<Scores> | undefined) => ownKeys(own).length === METRICS.length;
+
 export const missingMetrics = (scores: Scores) =>
   METRICS.filter((m) => scores[m.key] === null);
 

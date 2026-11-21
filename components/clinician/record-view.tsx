@@ -9,6 +9,7 @@ import { MeasureChart, RangePicker, type Range } from "./chart";
 import { SERIES } from "./case";
 import { DayLink, DayProvider } from "./day";
 import { fmtScore } from "./format";
+import { ownKeys, scoredEverything } from "@/lib/metrics";
 import { Pictures } from "./pictures";
 
 // The patient's whole record for the clinician: the graphs over the years,
@@ -85,7 +86,14 @@ export function RecordView({
                   <DayLink date={e.date} />
                 </div>
                 <p className="flex-1 text-sm">{e.text.trim() || <span className="text-muted">Figures only</span>}</p>
-                <Badge>Combined {fmtScore(e.combined)}</Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge>Combined {fmtScore(e.combined)}</Badge>
+                  {ownKeys(e.ownScores).length > 0 && (
+                    <span className="text-xs text-muted" data-own-note={e.date}>
+                      {scoredEverything(e.ownScores) ? "Scored by the patient" : `${ownKeys(e.ownScores).length} of 3 picked by the patient`}
+                    </span>
+                  )}
+                </div>
               </li>
             ))}
             {shown.length === 0 && <li className="px-5 py-4 text-muted">No entries match.</li>}

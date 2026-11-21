@@ -2,19 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  analyzeCheckin,
-  commitCheckin,
-  correctEntry,
-  todaysQuestions,
-  type Analysis,
-} from "@/lib/assessment";
-import { METRICS, combine, type MetricKey, type Scores } from "@/lib/metrics";
-import type { QuestionSet } from "@/lib/types";
-import { MeasureRow, Steps } from "./measure";
+import { analyzeCheckin, commitCheckin, removeTodaysCheckin, todaysQuestions } from "@/lib/assessment";
+import { METRICS, combine, ownKeys, scoredEverything, type Scores } from "@/lib/metrics";
+import type { Entry, QuestionSet } from "@/lib/types";
+import { MeasureRow } from "./measure";
+import { ScorePicker } from "./score-picker";
 
 const MAX_IMAGES = 3;
 const MAX_SIDE = 1280;
@@ -54,19 +49,48 @@ function recognitionCtor(): RecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+/** A picture in the form: one already saved in today's entry (key) or a new one (file). */
+type Picture = { url: string; key: string; file?: never } | { url: string; file: File; key?: never };
+
+/** Makes a textarea as tall as its text (never below its rows), so nothing scrolls inside it. */
+function useGrow(value: string) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [value]);
+  return ref;
+}
+
+const pictureOf = (key: string): Picture => ({ key, url: `/api/images?key=${encodeURIComponent(key)}` });
+
 type Phase =
   | { name: "write" }
   | { name: "working"; step: 1 | 2 }
-  | { name: "recorded"; analysis: Analysis; concern: boolean; date: string };
+  | { name: "recorded"; entry: Entry; concern: boolean };
 
 const big = "flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-lg font-semibold disabled:opacity-50";
 
-export function Checkin() {
+/**
+ * The one form for today's check-in. Opened fresh it makes the entry; opened
+ * again (with `existing`, today's saved entry) it shows what was saved and
+ * saving replaces it. Her own scores are picked on the same labelled scale
+ * the record is read in.
+ */
+export function Checkin({ existing }: { existing: Entry | null }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ name: "write" });
+  const [saved, setSaved] = useState<Entry | null>(existing);
   const [questions, setQuestions] = useState<QuestionSet | null | "none">(null);
-  const [text, setText] = useState("");
-  const [images, setImages] = useState<{ file: File; url: string }[]>([]);
+  const [text, setText] = useState(existing?.text ?? "");
+  const [images, setImages] = useState<Picture[]>(() => existing?.images.map(pictureOf) ?? []);
+  const [own, setOwn] = useState<Partial<Scores>>(existing?.ownScores ?? {});
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const textBox = useGrow(text);
   const [listening, setListening] = useState(false);
   const [canTalk, setCanTalk] = useState(false);
   const recognition = useRef<Recognition | null>(null);
@@ -123,7 +147,14 @@ export function Checkin() {
   function form(extra?: Record<string, string>) {
     const f = new FormData();
     f.set("text", text);
-    for (const image of images) f.append("images", image.file);
+    for (const image of images) {
+      if (image.file) f.append("images", image.file);
+      else f.append("keepImages", image.key);
+    }
+    for (const m of METRICS) {
+      const value = own[m.key];
+      if (value != null) f.set(`score_${m.key}`, String(value));
+    }
     for (const [k, v] of Object.entries(extra ?? {})) f.set(k, v);
     return f;
   }
@@ -140,13 +171,14 @@ export function Checkin() {
         return;
       }
       setPhase({ name: "working", step: 2 });
-      const saved = await commitCheckin(form({ analysis: JSON.stringify(read.analysis) }));
-      if (saved.status !== "saved") {
-        setError(saved.message);
+      const result = await commitCheckin(form({ analysis: JSON.stringify(read.analysis) }));
+      if (result.status !== "saved") {
+        setError(result.message);
         setPhase({ name: "write" });
         return;
       }
-      setPhase({ name: "recorded", analysis: read.analysis, concern: saved.concern, date: saved.entry.date });
+      setSaved(result.entry);
+      setPhase({ name: "recorded", entry: result.entry, concern: result.concern });
     } catch {
       setError("The request did not come back. Your words are still here; try again.");
       setPhase({ name: "write" });
@@ -155,7 +187,11 @@ export function Checkin() {
 
   if (phase.name === "working") {
     const steps = [
-      images.length ? "Reading your words and looking at your picture" : "Reading your words",
+      !text.trim() && images.length === 0
+        ? "Putting your scores together"
+        : images.length
+          ? "Reading your words and looking at your picture"
+          : "Reading your words",
       "Saving it to your record",
     ];
     return (
@@ -190,18 +226,46 @@ export function Checkin() {
   }
 
   if (phase.name === "recorded") {
-    return <Recorded analysis={phase.analysis} concern={phase.concern} date={phase.date} />;
+    return (
+      <Recorded
+        entry={phase.entry}
+        concern={phase.concern}
+        onChange={() => {
+          // The same form again, filled in with what was just saved.
+          setText(phase.entry.text);
+          setImages(phase.entry.images.map(pictureOf));
+          setOwn(phase.entry.ownScores ?? {});
+          setPhase({ name: "write" });
+        }}
+      />
+    );
   }
 
-  const canSave = text.trim().length > 0 || images.length > 0;
+  const canSave = text.trim().length > 0 || images.length > 0 || ownKeys(own).length > 0;
+
+  async function remove() {
+    setRemoving(true);
+    setError(null);
+    const result = await removeTodaysCheckin();
+    setRemoving(false);
+    setConfirmRemove(false);
+    if (result.status === "removed") router.push("/patient");
+    else setError(result.message);
+  }
   return (
     <>
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Check in</h1>
+        <h1 className="text-2xl font-semibold">{saved ? "Today’s check-in" : "Check in"}</h1>
         <Link href="/patient" className="min-h-11 content-center text-accent underline underline-offset-2">
           Cancel
         </Link>
       </header>
+
+      {saved && (
+        <p className="rounded-2xl border border-accent-soft bg-accent-soft p-4">
+          This is what you saved earlier today. Change the words or the scores, take a picture out or add another, and save to replace it.
+        </p>
+      )}
 
       <section aria-labelledby="q-title" className="flex flex-col gap-3">
         <h2 id="q-title" className="text-lg font-semibold">
@@ -245,11 +309,12 @@ export function Checkin() {
           Answer as much or as little as you like. Say how the itching, the comfort and getting about have been. You can write, talk, or add a picture.
         </p>
         <textarea
+          ref={textBox}
           value={text}
           onChange={(event) => setText(event.target.value)}
           rows={7}
           aria-label="Your notes for today"
-          className="w-full rounded-2xl border border-line bg-surface p-3 text-base"
+          className="w-full resize-none overflow-hidden rounded-2xl border border-line bg-surface p-3 text-base"
         />
         {images.length > 0 && (
           <ul className="flex flex-wrap gap-3">
@@ -282,43 +347,66 @@ export function Checkin() {
         </div>
       </section>
 
+      <section aria-labelledby="own-title" className="flex flex-col gap-3">
+        <h2 id="own-title" className="text-lg font-semibold">
+          Or score it yourself
+        </h2>
+        <p className="text-sm text-muted">
+          If you like, say how each one has been. What you pick is what is recorded, and it is marked as yours. Whatever you leave open is read from your words and pictures.
+        </p>
+        <Card>
+          <div className="divide-y divide-line">
+            {METRICS.map((m) => (
+              <ScorePicker key={m.key} metric={m} value={own[m.key] ?? null} onChange={(value) => setOwn((current) => ({ ...current, [m.key]: value }))} />
+            ))}
+          </div>
+        </Card>
+      </section>
+
       {error && (
         <p role="alert" data-testid="checkin-error" className="rounded-xl border border-warn bg-warn-soft p-3 text-warn">
           {error}
         </p>
       )}
       <button type="button" onClick={save} disabled={!canSave} className={`${big} bg-accent text-accent-ink`}>
-        Save my check-in
+        {saved ? "Save my changes" : "Save my check-in"}
       </button>
+      {saved && (
+        <div className="flex flex-col gap-2">
+          {confirmRemove ? (
+            <div role="alertdialog" aria-label="Remove today’s check-in" className="flex flex-col gap-2 rounded-2xl border border-alert bg-alert-soft p-4">
+              <p>Remove today’s check-in? Its words, pictures and scores are taken out of your record and your history, as if you had not checked in today.</p>
+              <div className="flex gap-3">
+                <button type="button" onClick={remove} disabled={removing} className="min-h-12 flex-1 rounded-xl bg-alert px-4 font-semibold text-accent-ink disabled:opacity-50">
+                  {removing ? "Removing…" : "Yes, remove it"}
+                </button>
+                <button type="button" onClick={() => setConfirmRemove(false)} disabled={removing} className="min-h-12 flex-1 rounded-xl border border-line bg-surface px-4 font-semibold">
+                  Keep it
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setConfirmRemove(true)} className="min-h-12 rounded-xl border border-line bg-surface px-4 font-medium text-alert">
+              Remove today’s check-in
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 }
 
-function Recorded({ analysis, concern, date }: { analysis: Analysis; concern: boolean; date: string }) {
+function Recorded({ entry, concern, onChange }: { entry: Entry; concern: boolean; onChange: () => void }) {
   const router = useRouter();
-  const [scores, setScores] = useState<Scores>(analysis.scores);
-  const [editing, setEditing] = useState<MetricKey | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const dirty = METRICS.some((m) => scores[m.key] !== analysis.scores[m.key]);
-
-  async function done() {
-    if (!dirty) {
-      router.push("/patient");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    const result = await correctEntry(date, scores);
-    setBusy(false);
-    if (result.status === "saved") router.push("/patient");
-    else setError(result.message);
-  }
+  const own = ownKeys(entry.ownScores);
+  const everything = scoredEverything(entry.ownScores);
 
   return (
     <>
       <h1 className="text-2xl font-semibold">Saved. Here is what I recorded</h1>
-      <p className="text-muted">This is how I read what you said. If I got something wrong, change it.</p>
+      <p className="text-muted">
+        {everything ? "You scored all three yourself, so this is exactly what you picked." : "This is how I read what you said, with what you picked yourself. If something is wrong, change it."}
+      </p>
 
       {concern && (
         <Card className="border-alert bg-alert-soft">
@@ -336,66 +424,41 @@ function Recorded({ analysis, concern, date }: { analysis: Analysis; concern: bo
         <div className="divide-y divide-line">
           {METRICS.map((m) => (
             <div key={m.key} className="py-1">
-              {scores[m.key] === null ? (
-                <div className="flex items-center justify-between gap-3 py-2">
-                  <div>
-                    <div className="text-sm text-muted">{m.label}</div>
-                    <div className="text-muted">You did not say, so nothing is recorded</div>
-                  </div>
+              {entry.scores[m.key] === null ? (
+                <div className="py-2">
+                  <div className="text-sm text-muted">{m.label}</div>
+                  <div className="text-muted">Not recorded: you did not say. Change the check-in to add it.</div>
                 </div>
               ) : (
-                <MeasureRow name={m.key} score={scores[m.key]} />
-              )}
-              <button
-                type="button"
-                onClick={() => setEditing(editing === m.key ? null : m.key)}
-                aria-expanded={editing === m.key}
-                className="min-h-11 text-accent underline underline-offset-2"
-              >
-                {scores[m.key] === null ? `Add ${m.label.toLowerCase()}` : "Change"}
-              </button>
-              {editing === m.key && (
-                <fieldset className="mb-2 mt-1 flex flex-col gap-2">
-                  <legend className="sr-only">{m.label}</legend>
-                  {[5, 4, 3, 2, 1].map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      aria-pressed={scores[m.key] === n}
-                      onClick={() => {
-                        setScores((s) => ({ ...s, [m.key]: n }));
-                        setEditing(null);
-                      }}
-                      className={`flex min-h-12 items-center justify-between rounded-xl border px-4 text-left ${scores[m.key] === n ? "border-accent bg-accent-soft font-semibold" : "border-line bg-surface"}`}
-                    >
-                      {m.words[n - 1]}
-                      <Steps score={n} />
-                    </button>
-                  ))}
-                </fieldset>
+                <>
+                  <MeasureRow name={m.key} score={entry.scores[m.key]} />
+                  {own.includes(m.key) && <p className="-mt-1 pb-1 text-sm text-muted">You picked this one.</p>}
+                </>
               )}
             </div>
           ))}
         </div>
         <div className="mt-2 border-t border-line pt-2">
-          <MeasureRow name="combined" score={combine(scores)} />
+          <MeasureRow name="combined" score={combine(entry.scores)} />
           <p className="text-sm text-muted">Put together from the three above.</p>
         </div>
       </Card>
 
       <p className="text-sm text-muted">
-        {analysis.analyzedBy === "claude" ? "Read by Claude." : "Read by the built-in stand-in, which only counts words; it is not the AI."}
-        {analysis.rationale && analysis.analyzedBy === "claude" ? ` ${analysis.rationale}` : ""}
+        {everything
+          ? "Scored by you."
+          : entry.analyzedBy === "claude"
+            ? `The rest was read by Claude. ${entry.rationale}`
+            : entry.analyzedBy === "dummy"
+              ? "The rest was read by the built-in stand-in, which only counts words; it is not the AI."
+              : "Scored by you."}
       </p>
-      {error && (
-        <p role="alert" className="rounded-xl border border-warn bg-warn-soft p-3 text-warn">
-          {error}
-        </p>
-      )}
-      <button type="button" onClick={done} disabled={busy} className={`${big} bg-accent text-accent-ink`}>
-        {busy ? "Saving…" : dirty ? "Save my changes" : "That looks right"}
+      <button type="button" onClick={() => router.push("/patient")} className={`${big} bg-accent text-accent-ink`}>
+        That looks right
+      </button>
+      <button type="button" onClick={onChange} className={`${big} border border-line bg-surface`}>
+        Change this check-in
       </button>
     </>
   );
 }
-

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { METRICS } from "@/lib/metrics";
+import { METRICS, ownKeys, scoredEverything } from "@/lib/metrics";
 import type { Entry } from "@/lib/types";
 import { SERIES, valueOf } from "./case";
 import { fmtScore, longDate } from "./format";
@@ -79,16 +79,25 @@ export function DayProvider({ entries, children }: { entries: Entry[]; children:
 }
 
 function DayBody({ entry }: { entry: Entry }) {
+  const everything = scoredEverything(entry.ownScores);
   return (
     <>
       <section>
         <h3 className="mb-2 text-sm font-medium text-muted">Figures (5 is the good end)</h3>
+        {everything && <p className="mb-2 text-sm font-medium">Scored by the patient.</p>}
         <ul className="space-y-2">
           {SERIES.map((s) => {
             const v = valueOf(entry, s.key);
             return (
               <li key={s.key} className="flex items-center gap-3 text-sm">
-                <span className={`w-36 shrink-0 ${s.key === "combined" ? "font-medium" : ""}`}>{s.label}</span>
+                <span className={`w-36 shrink-0 ${s.key === "combined" ? "font-medium" : ""}`}>
+                  {s.label}
+                  {s.key !== "combined" && entry.ownScores?.[s.key] != null && (
+                    <span className="block text-xs font-normal text-muted" data-own={s.key}>
+                      picked by the patient
+                    </span>
+                  )}
+                </span>
                 <span className="h-2 flex-1 rounded-full bg-page">
                   <span
                     className="block h-2 rounded-full bg-accent"
@@ -133,7 +142,7 @@ function DayBody({ entry }: { entry: Entry }) {
           <h3 className="mb-1 text-sm font-medium text-muted">How the figures were read</h3>
           <p className="text-sm">{entry.rationale}</p>
           <p className="mt-1 text-xs text-muted">
-            Read out of what she wrote by {entry.analyzedBy === "claude" ? "the AI analysis" : entry.analyzedBy === "dummy" ? "the keyword stand-in" : "made-up history"}.
+            {entry.analyzedBy === "patient" ? "Scored by the patient." : <>Read out of what she wrote by {entry.analyzedBy === "claude" ? "the AI analysis" : entry.analyzedBy === "dummy" ? "the keyword stand-in" : "made-up history"}{ownKeys(entry.ownScores).length ? ", apart from the figures she picked herself" : ""}.</>}
           </p>
         </section>
       )}

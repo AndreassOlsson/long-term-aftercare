@@ -18,13 +18,14 @@ export type Entry = {
   /** The targeted questions the patient was shown that day. */
   questions?: string[];
   followUp: { question: string; answer: string | null } | null;
-  analyzedBy: "claude" | "dummy" | "seed";
+  /** "patient" when she scored what could be scored and there was nothing for the analysis to read. */
+  analyzedBy: "claude" | "dummy" | "seed" | "patient";
+  /** The measures the patient picked herself (whole numbers 1 to 5). In `scores` they stand exactly as picked. */
+  ownScores?: Partial<Scores>;
   /** The case summary as it stood after this entry. */
   caseSummary: string | null;
   /** The entry mentions a wound or signs of infection; the patient was told to contact the clinic. */
   safetyFlag?: boolean;
-  /** The patient changed what was recorded. */
-  corrected?: boolean;
 };
 
 /** The targeted questions prepared for one day's assessment. */

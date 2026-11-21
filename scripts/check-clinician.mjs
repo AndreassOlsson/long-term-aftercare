@@ -2,7 +2,9 @@
 //   sample request saved -> login -> it tops the inbox with its reason ->
 //   opening it marks it seen -> an evidence day opens from it -> an offered
 //   time is sent (answered, reply readable through getRequest) -> the reset
-//   puts the stored data back to the starting state.
+//   puts the stored data back to the starting state. Also: a check-in in
+//   which the patient scored one measure herself shows in the record and in
+//   the day as picked by the patient.
 // Run after `npm run build`. It starts the app itself on a free port with the
 // passwords from .env.example, or uses BASE_URL (with DOCTOR_PASSWORD) when set.
 // SHOTS_DIR=<folder> also saves a 1280 px screenshot of every screen.
@@ -83,6 +85,36 @@ try {
 
   const saved = await api("/api/demo/request", "POST");
   check("a sample request is saved", saved.ok());
+
+  // A check-in in which the patient scored one measure herself, made through her own screens.
+  const patientContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const patientPage = await patientContext.newPage();
+  patientPage.setDefaultTimeout(60_000);
+  await patientPage.goto(`${base}/patient/login`);
+  await patientPage.fill('input[name="password"]', process.env.PATIENT_PASSWORD ?? env.PATIENT_PASSWORD);
+  await patientPage.click("button");
+  await patientPage.waitForURL(`${base}/patient`);
+  await patientPage.goto(`${base}/patient/checkin`);
+  await patientPage.getByLabel("Your notes for today").fill("The liner itched in the afternoon and the socket felt tight when I walked.");
+  await patientPage.locator("button[data-measure=comfort][data-step='2']").click();
+  await patientPage.getByRole("button", { name: "Save my check-in" }).click();
+  await patientPage.getByRole("heading", { name: "Saved. Here is what I recorded" }).waitFor();
+  await patientContext.close();
+
+  // The record marks the figure she picked herself, in the day and in the list of entries.
+  await page.goto(`${base}/doctor/patients/maria`);
+  await page.waitForSelector("text=Summary of the record");
+  const noted = await page.locator("[data-own-note]").first().textContent();
+  check("the record's entry list says how many figures she picked", /1 of 3 picked by the patient/.test(noted ?? ""), noted ?? "");
+  await page.locator("[data-own-note]").first().locator("xpath=ancestor::li").locator("[data-day]").click();
+  const ownDay = page.getByRole("dialog");
+  await ownDay.waitFor();
+  const marked = ownDay.locator("[data-own=comfort]");
+  check("the day marks the patient-picked figure: comfort", await marked.isVisible() && /picked by the patient/.test((await marked.textContent()) ?? ""));
+  check("and not the figures read from her words", (await ownDay.locator("[data-own]").count()) === 1);
+  await shoot("04b-own-score-marked");
+  if (shots) await page.screenshot({ path: path.join(shots, "04c-own-score-marked-1280.png") });
+  await page.keyboard.press("Escape");
 
   // The inbox.
   await page.goto(`${base}/doctor`);
