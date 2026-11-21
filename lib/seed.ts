@@ -10,6 +10,8 @@ import type { Entry } from "./types";
 // where the fit goes and things slide. Deterministic: the same every run.
 const YEARS_BACK = 1100;
 const SLIDE_DAYS = 28;
+const THIN_FROM = 150;
+const THIN_TO = 765;
 
 const NOTES: Record<number, string> = {
   1090: "First week with the new socket. Feels snug, a little strange but fine.",
@@ -58,7 +60,15 @@ function checkInDays(): number[] {
     else ago += 6 + ((ago * 7) % 3);
   }
   for (const key of Object.keys(NOTES)) if (!days.includes(Number(key))) days.push(Number(key));
-  return days.sort((a, b) => b - a);
+  days.sort((a, b) => b - a);
+  // Thinned on his word (2026-11-21): about fifty check-ins fewer in the
+  // middle of the history, every second one between roughly five months and
+  // two years ago. Days she wrote something on are kept.
+  let seen = 0;
+  return days.filter((ago) => {
+    if (ago <= THIN_FROM || ago >= THIN_TO || NOTES[ago]) return true;
+    return seen++ % 2 === 0;
+  });
 }
 
 export function seedEntries(patientId: string): Entry[] {
