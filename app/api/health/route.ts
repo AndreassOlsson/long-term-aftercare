@@ -30,6 +30,7 @@ export async function GET(request: Request) {
       BLOB_STORE_ID: has("BLOB_STORE_ID"),
       ANTHROPIC_API_KEY: has("ANTHROPIC_API_KEY"),
     },
+    closed: process.env.SITE_OPEN !== "1",
     storage: storageKind(),
     // Only with ?check=storage, since it writes.
     storageRoundTrip:

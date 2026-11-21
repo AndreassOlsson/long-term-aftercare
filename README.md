@@ -1,5 +1,7 @@
 # Long-term aftercare
 
+**The site is closed.** `proxy.ts` answers every request with a "closed for now" page, so nothing reaches the Anthropic key or the storage. Set `SITE_OPEN=1` in Vercel and redeploy to open it again.
+
 A proof of concept: a patient keeps a timeline of text and images about
 life with their orthosis or prosthesis, and their clinician reads it.
 
