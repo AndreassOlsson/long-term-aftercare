@@ -1,4 +1,5 @@
 import { isSignedIn } from "@/lib/auth";
+import { today } from "@/lib/dates";
 import { getEntries } from "@/lib/entries";
 import { PATIENTS } from "@/lib/patients";
 import { listRequests } from "@/lib/requests";
@@ -12,8 +13,10 @@ export async function GET() {
   const id = PATIENTS[0].id;
   const [entries, requests] = await Promise.all([getEntries(id), listRequests(id)]);
   return Response.json({
-    entries: entries.filter((e) => e.analyzedBy !== "seed").map((e) => ({ date: e.date, text: e.text, scores: e.scores, images: e.images, analyzedBy: e.analyzedBy, corrected: e.corrected ?? false })),
+    entries: entries.filter((e) => e.analyzedBy !== "seed").map((e) => ({ date: e.date, text: e.text, scores: e.scores, images: e.images, analyzedBy: e.analyzedBy, ownScores: e.ownScores ?? {}, combined: e.combined })),
     entryCount: entries.length,
+    today: today(),
+    dates: entries.map((e) => e.date),
     requests,
   });
 }

@@ -52,3 +52,9 @@ export async function recordMetrics(patientId: string, date: string, scores: Sco
   rows.sort((a, b) => a.date.localeCompare(b.date));
   await putObject(csvKey(patientId), toCsv(rows), "text/csv");
 }
+
+/** Takes the day's row out, so the graphs and the record no longer have that day. */
+export async function removeMetrics(patientId: string, date: string): Promise<void> {
+  const rows = (await readMetrics(patientId)).filter((row) => row.date !== date);
+  await putObject(csvKey(patientId), toCsv(rows), "text/csv");
+}
