@@ -3,11 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { seenAnswers } from "./seen";
 
-// The patient's side is one page per section. The document is the one
-// scroller and it snaps, one section per stop, each the height of the screen;
-// anything longer scrolls inside its own frame. The same behaviour as the
-// life-os GUI's Page.svelte, in this app's terms. The bar at the foot says
-// where she is and goes to a section with one tap, so no swiping is needed.
+// The patient's side is one page per section, stacked, and the page scrolls
+// as any page does: no snapping. Home is exactly one screen tall; the others
+// are at least one screen and grow with their content. The bar at the foot
+// says where she is and goes to a section with one tap.
 
 export type PagerSection = { id: string; label: string; icon: string; content: React.ReactNode };
 
@@ -17,11 +16,6 @@ export function Pager({ sections, answered }: { sections: PagerSection[]; answer
   const [here, setHere] = useState(sections[0].id);
   const [fresh, setFresh] = useState(0);
   const first = useRef(true);
-
-  useEffect(() => {
-    document.documentElement.classList.add("pager");
-    return () => document.documentElement.classList.remove("pager");
-  }, []);
 
   useEffect(() => {
     // Which section is on screen: more than half of it in the viewport is the one she is in.
@@ -77,7 +71,7 @@ export function Pager({ sections, answered }: { sections: PagerSection[]; answer
           data-page={s.id}
           aria-label={s.label}
           tabIndex={-1}
-          className="h-dvh snap-start snap-always overflow-y-auto outline-none"
+          className={`outline-none ${s.id === "home" ? "h-dvh overflow-hidden" : "min-h-dvh"}`}
         >
           <div className="mx-auto flex min-h-full w-full max-w-md flex-col gap-5 px-4 pb-24 pt-5">{s.content}</div>
         </section>

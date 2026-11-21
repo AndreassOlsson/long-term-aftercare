@@ -2,13 +2,14 @@
 
 How the team shows it: the clinician's side open on the big screen (desktop),
 and a team member using the patient's side on his own phone, as Maria. About
-five minutes. The patient's side is `/patient` (password from
-`PATIENT_PASSWORD`), the clinician's is `/doctor` (`DOCTOR_PASSWORD`). Locally
-the example passwords are `maria` and `doctor`.
+five minutes. Open the front page and choose a side: the patient's is
+`/patient`, the clinician's `/doctor`, and neither asks for a password. (With
+`REQUIRE_PASSWORD=1` they ask for `PATIENT_PASSWORD` and `DOCTOR_PASSWORD`; the
+example ones are `maria` and `doctor`.)
 
 ## Before you start
 
-1. On the big screen open `/doctor`, log in, open **Demo tools** (top right)
+1. On the big screen open `/doctor`, open **Demo tools** (top right)
    and choose **Reset to the starting state**, then confirm. Maria's record is
    now three made-up years: a long good stretch, then a slide over the last
    weeks, yesterday bad too, and **today not yet reported**. The inbox says

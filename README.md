@@ -3,7 +3,10 @@
 A proof of concept: a patient keeps a timeline of text and images about
 life with their orthosis or prosthesis, and their clinician reads it.
 
-There is one mock patient, Maria Andersson, and two fixed logins:
+There is one mock patient, Maria Andersson, and two fixed logins.
+
+**The site is open without a password unless `REQUIRE_PASSWORD=1` is set** (the address is public and every check-in spends the Anthropic key). Choosing a side on the front page signs in as that role; with `REQUIRE_PASSWORD=1` the passwords below are asked for.
+
 
 | Route | Who | Password comes from |
 |---|---|---|
@@ -19,7 +22,7 @@ The hub for the aftercare that runs for years after a fitting. This is the patie
 **Patient (`/patient`):** four tabs.
 
 - **Home** says in plain words how things have been lately, has one main action (check in, or read the clinic's answer), shows the suggestions drawn from her own record each with its reason and the days it rests on, and proposes a request when the record shows a sustained change.
-- **Check in** (`/patient/checkin`): the questions first (the question agent reads her record and asks about patterns, to make her reflect), then she types, talks or adds a picture. She can also score any measure herself, on a labelled scale (the stored value is the step, 1 to 5; she reads words). Her own score stands: the metrics agent is told which measures she scored, records them unchanged and reads only the rest, and nothing is asked about a measure she scored. Scores, text or a picture, any one is enough to save; an entry from which nothing can be read is never saved (checked in `analyzeCheckin` and again in `commitCheckin`). Opening today's check-in again shows what was saved in the same form, and saving replaces today's entry (only pictures from today's own entry can be kept); it can also be removed, which takes the day out of the record and the graphs. The entry keeps which scores were hers (`ownScores`), and both sides show it.
+- **Check in** (`/patient/checkin`): the one question first (the question agent reads her record and asks about patterns, to make her reflect), then she types, talks or adds a picture. She can also score any measure herself, on a labelled scale (the stored value is the step, 1 to 5; she reads words). Her own score stands: the metrics agent is told which measures she scored, records them unchanged and reads only the rest, and nothing is asked about a measure she scored. Scores, text or a picture, any one is enough to save; an entry from which nothing can be read is never saved (checked in `analyzeCheckin` and again in `commitCheckin`). Opening today's check-in again shows what was saved in the same form, and saving replaces today's entry (only pictures from today's own entry can be kept); it can also be removed, which takes the day out of the record and the graphs. The entry keeps which scores were hers (`ownScores`), and both sides show it.
 - **History** (`/patient/history`): how well it has been working, over years, in a window that moves; the combined line comes apart into itching, comfort and mobility; any day opens its words and pictures.
 - **Clinic** (`/patient/clinic`): ask for a check-up (the request agent prepares it from the record; she edits and sends it through `saveRequest`), and see where each request stands and what the clinician answered.
 
@@ -29,7 +32,7 @@ Where things live:
 
 - `lib/metrics.ts` the three metrics (itchiness, comfort, perceived mobility) and how they combine. Every score is 1 to 5 with 5 as the good end; the combined score is their mean. Change the metrics here.
 - `lib/agents/` the agents and the case summary (questions, metrics, request draft; `lib/suggestions.ts` is the fourth agent, with `agents/safety.ts` the rule that keeps wounds out of self-care advice). Each asks Claude when `ANTHROPIC_API_KEY` is set and otherwise falls back to a simple stand-in, so the flow works without a key.
-  - `question-agent.ts` prepares today's targeted questions before the patient writes: it looks up recent and long-term datapoints, the patient's earlier words and pictures, and the questions already asked, then picks one to three. Prepared once per day and kept.
+  - `question-agent.ts` prepares today's targeted questions before the patient writes: it looks up recent and long-term datapoints, the patient's earlier words and pictures, and the questions already asked, then picks the one most worth asking. Prepared once per day and kept.
   - `metrics-agent.ts` **the analysis placeholder.** Turns today's entry into a score per metric, and can look at earlier days to read "worse than yesterday" against the record.
   - `tools.ts` what an agent can look up in a patient's record; `run.ts` the shared loop (the Anthropic SDK's tool runner).
 - `lib/metrics-csv.ts` the finalized scores, one row per day, in `patients/<id>/metrics.csv`. The graphs and both agents read this file.
@@ -37,8 +40,8 @@ Where things live:
 - `lib/storage.ts` where the CSV, the entries (text, questions) and the pictures are kept: the Vercel Blob store when its token is present, the `.data/` folder on disk otherwise.
 - `lib/seed.ts` three years of made-up weekly history for Maria, with his three supplied photos (`public/photos/`) reused along the timeline, so the graphs are not empty. The first real entry writes it into the CSV together with the new row.
 - `lib/agents/reflect-agent.ts` the app's answer to a bad day: whether today is bad after bad days is decided in code (`judgeDay`), the model only words the one question and the recommendation. `lib/request-pdf.ts` the check-up request as a PDF, served by `app/api/request-pdf` to both sides.
-- `components/patient/` the patient's screens, one full page per section with a snap between them (`pager.tsx`: Home, History, Ideas, Clinic, Settings), and the check-in, the request and one request's status as focused pages outside it; `components/timeline.tsx` is the older graph the clinician's side still uses.
-- `lib/auth.ts` the fixed-password login. Call `requireRole("patient")` or `requireRole("doctor")` at the top of any protected page.
+- `components/patient/` the patient's screens, one page per section, stacked, with no scroll-snap and home exactly one screen (`pager.tsx`: Home, History, Ideas, Clinic, Settings), and the check-in, the request and one request's status as focused pages outside it; `components/timeline.tsx` is the older graph the clinician's side still uses.
+- `lib/auth.ts` the fixed-password login (passwords only with `REQUIRE_PASSWORD=1`; otherwise `/patient/login/enter` and `/doctor/login/enter` set the session). Call `requireRole("patient")` or `requireRole("doctor")` at the top of any protected page.
 - `app/api/health` shows which commit is live and which environment variables the deployment can see (never their values).
 
 One entry per day: doing the assessment again the same day replaces that day's point.

@@ -406,7 +406,7 @@ export function Checkin({ existing }: { existing: Entry | null }) {
         </h2>
         {questions && questions !== "none" ? (
           <ul className="flex flex-col gap-2" data-testid="todays-questions">
-            {questions.questions.map((q) => (
+            {questions.questions.slice(0, 1).map((q) => (
               <li key={q} className="rounded-2xl border border-accent-soft bg-accent-soft p-3 text-base">
                 {q}
               </li>
@@ -426,7 +426,7 @@ export function Checkin({ existing }: { existing: Entry | null }) {
         />
         {questions && questions !== "none" && (
           <details className="text-sm text-muted">
-            <summary className="min-h-8 cursor-pointer">Why these questions?</summary>
+            <summary className="min-h-8 cursor-pointer">Why this question?</summary>
             <p className="mt-1">{questions.basedOn}</p>
             <p className="mt-1">{questions.askedBy === "claude" ? "Asked by Claude." : "Asked by the built-in stand-in, not the AI."}</p>
           </details>

@@ -25,6 +25,11 @@ function same(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/** Open by default (a proof of concept shown by address); REQUIRE_PASSWORD=1 brings the passwords back. */
+export function passwordRequired(): boolean {
+  return process.env.REQUIRE_PASSWORD === "1";
+}
+
 export function isConfigured(role: Role): boolean {
   return Boolean(process.env[PASSWORD_ENV[role]] && process.env.SESSION_SECRET);
 }
@@ -40,10 +45,7 @@ export async function requireRole(role: Role): Promise<void> {
   if (!(await isSignedIn(role))) redirect(`/${role}/login`);
 }
 
-export async function signIn(role: Role, password: string): Promise<boolean> {
-  const expected = process.env[PASSWORD_ENV[role]];
-  const token = sign(role);
-  if (!expected || !token || !same(password, expected)) return false;
+async function setSession(role: Role, token: string): Promise<void> {
   (await cookies()).set(cookieName(role), token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -51,6 +53,21 @@ export async function signIn(role: Role, password: string): Promise<boolean> {
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
   });
+}
+
+export async function signIn(role: Role, password: string): Promise<boolean> {
+  const expected = process.env[PASSWORD_ENV[role]];
+  const token = sign(role);
+  if (!expected || !token || !same(password, expected)) return false;
+  await setSession(role, token);
+  return true;
+}
+
+/** The same session without typing: only when passwords are not required. */
+export async function signInOpen(role: Role): Promise<boolean> {
+  const token = sign(role);
+  if (passwordRequired() || !token) return false;
+  await setSession(role, token);
   return true;
 }
 

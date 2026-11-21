@@ -8,7 +8,7 @@
 //   which the patient scored one measure herself shows in the record and in
 //   the day as picked by the patient.
 // Run after `npm run build`. It starts the app itself on a free port with the
-// passwords from .env.example, or uses BASE_URL (with DOCTOR_PASSWORD) when set.
+// example env, or uses BASE_URL when set.
 // SHOTS_DIR=<folder> also saves a 1280 px screenshot of every screen.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -56,7 +56,6 @@ if (!base) {
     await new Promise((r) => setTimeout(r, 500));
   }
 }
-const password = process.env.DOCTOR_PASSWORD ?? env.DOCTOR_PASSWORD;
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -69,15 +68,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try {
   // Login (and the login screen).
-  await page.goto(`${base}/doctor`);
-  check("an unauthenticated visit goes to the login", page.url().endsWith("/doctor/login"));
-  await shoot("01-login");
+  await page.goto(base);
+  await page.getByRole("link", { name: /I am a clinician/ }).click();
+  await page.waitForURL(`${base}/doctor`);
+  check("the front page leads into the clinician's side with no password field", (await page.locator('input[type="password"]').count()) === 0);
+  await shoot("01-front-door");
   const unauth = await fetch(`${base}/api/demo/reset`, { method: "POST" });
   check("the reset refuses a visitor who is not logged in", unauth.status === 401, `status ${unauth.status}`);
-  await page.fill('input[name="password"]', password);
-  await page.click('button:has-text("Log in")');
-  await page.waitForURL(`${base}/doctor`);
-  check("the clinician logs in", true);
 
   // Starting state, then a sample request saved through saveRequest.
   await api("/api/demo/reset", "POST");
@@ -100,8 +97,6 @@ try {
   const patientPage = await patientContext.newPage();
   patientPage.setDefaultTimeout(60_000);
   await patientPage.goto(`${base}/patient/login`);
-  await patientPage.fill('input[name="password"]', process.env.PATIENT_PASSWORD ?? env.PATIENT_PASSWORD);
-  await patientPage.click("button");
   await patientPage.waitForURL(`${base}/patient`);
   await patientPage.goto(`${base}/patient/checkin`);
   await patientPage.getByLabel("Your notes for today").fill("The liner itched in the afternoon and the socket felt tight when I walked.");
@@ -203,6 +198,39 @@ try {
   }
   await page.goto(`${base}/doctor`);
   check("the inbox is empty again", await page.getByText("No check-up requests are waiting").isVisible());
+  // REQUIRE_PASSWORD=1 brings the password back (a second server of the same build).
+  if (!process.env.BASE_URL) {
+    const port2 = Number(new URL(base).port) + 500;
+    const locked = spawn("npx", ["next", "start", "-p", String(port2)], {
+      cwd: root,
+      env: { ...process.env, ...env, ANTHROPIC_API_KEY: "", REQUIRE_PASSWORD: "1" },
+      stdio: "ignore",
+    });
+    try {
+      const lockedBase = `http://localhost:${port2}`;
+      for (let i = 0; i < 60; i++) {
+        try {
+          if ((await fetch(`${lockedBase}/doctor/login`)).ok) break;
+        } catch {}
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const lockedPage = await (await browser.newContext()).newPage();
+      for (const [role, label] of [["doctor", "Clinician"], ["patient", "Patient"]]) {
+        await lockedPage.goto(`${lockedBase}/${role}`);
+        check(`with REQUIRE_PASSWORD=1 the ${role}'s side asks for the password`, lockedPage.url().endsWith(`/${role}/login`) && (await lockedPage.locator('input[type="password"]').count()) === 1);
+        await lockedPage.fill('input[name="password"]', "wrong-password");
+        await lockedPage.click("button");
+        await lockedPage.getByText("Wrong password.").waitFor();
+        check(`and a wrong password is refused (${label})`, lockedPage.url().includes("/login"));
+        await lockedPage.fill('input[name="password"]', env[role === "doctor" ? "DOCTOR_PASSWORD" : "PATIENT_PASSWORD"]);
+        await lockedPage.click("button");
+        await lockedPage.waitForURL(`${lockedBase}/${role}`);
+        check(`and the right one gets in (${label})`, true);
+      }
+    } finally {
+      locked.kill();
+    }
+  }
 } catch (error) {
   check("the run completed", false, String(error).split("\n")[0]);
   await shoot("failure").catch(() => {});
