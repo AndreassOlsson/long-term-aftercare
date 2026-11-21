@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   description: "A timeline a patient keeps about their orthosis or prosthesis, shared with their clinician.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
