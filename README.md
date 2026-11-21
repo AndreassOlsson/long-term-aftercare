@@ -22,10 +22,14 @@ The core flow, with the analysis as a placeholder and no styling decisions made.
 Where things live:
 
 - `lib/metrics.ts` the three metrics (itchiness, comfort, perceived mobility) and how they combine. Every score is 1 to 5 with 5 as the good end; the combined score is their mean. Change the metrics here.
-- `lib/analysis.ts` **the placeholder to replace.** It turns an entry into scores and writes the case summary. It asks Claude when `ANTHROPIC_API_KEY` is set and otherwise falls back to a keyword count, so the flow works without a key.
+- `lib/agents/` the two agents and the case summary. Each asks Claude when `ANTHROPIC_API_KEY` is set and otherwise falls back to a simple stand-in, so the flow works without a key.
+  - `question-agent.ts` prepares today's targeted questions before the patient writes: it looks up recent and long-term datapoints, the patient's earlier words and pictures, and the questions already asked, then picks one to three. Prepared once per day and kept.
+  - `metrics-agent.ts` **the analysis placeholder.** Turns today's entry into a score per metric, and can look at earlier days to read "worse than yesterday" against the record.
+  - `tools.ts` what an agent can look up in a patient's record; `run.ts` the shared loop (the Anthropic SDK's tool runner).
+- `lib/metrics-csv.ts` the finalized scores, one row per day, in `patients/<id>/metrics.csv`. The graphs and both agents read this file.
 - `lib/assessment.ts` what happens when the patient presses Done.
-- `lib/storage.ts` where entries and pictures are kept: the Vercel Blob store when its token is present, the `.data/` folder on disk otherwise.
-- `lib/seed.ts` six weeks of made-up history for Maria so the graphs are not empty. A real entry replaces the made-up one for its day.
+- `lib/storage.ts` where the CSV, the entries (text, questions) and the pictures are kept: the Vercel Blob store when its token is present, the `.data/` folder on disk otherwise.
+- `lib/seed.ts` six weeks of made-up history for Maria so the graphs are not empty. The first real entry writes it into the CSV together with the new row.
 - `components/timeline.tsx` the graph and its split animation, shared by both sides.
 - `lib/auth.ts` the fixed-password login. Call `requireRole("patient")` or `requireRole("doctor")` at the top of any protected page.
 - `app/api/health` shows which commit is live and which environment variables the deployment can see (never their values).
@@ -61,7 +65,7 @@ Two GitHub Actions workflows in `.github/workflows/` do this. Agents cannot writ
 1. On vercel.com, import this repository as a new project (framework Next.js, defaults).
 2. In the project, under Settings then Environment Variables, add `PATIENT_PASSWORD`, `DOCTOR_PASSWORD` and `SESSION_SECRET` (any long random string) for Production and Preview.
 3. In the project, under Storage, create a Blob store with **private** access and connect it. That sets `BLOB_READ_WRITE_TOKEN` by itself. Entries and pictures live there. Without it the live site shows a warning and forgets new entries.
-3b. Add `ANTHROPIC_API_KEY` as an environment variable to switch the analysis from the keyword stand-in to Claude.
+3b. Add `ANTHROPIC_API_KEY` as an environment variable to switch the agents from the stand-ins to Claude.
 4. In GitHub, under Settings then Secrets and variables then Actions, add three repository secrets:
    - `VERCEL_TOKEN` from vercel.com/account/tokens
    - `VERCEL_ORG_ID` the Team ID under the Vercel team's Settings

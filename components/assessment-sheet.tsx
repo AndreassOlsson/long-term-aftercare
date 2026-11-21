@@ -49,9 +49,12 @@ function recognitionCtor(): RecognitionCtor | null {
 }
 
 export function AssessmentSheet({
+  questions,
   onClose,
   onSaved,
 }: {
+  /** Today's targeted questions; null while they are still being prepared. */
+  questions: string[] | null;
   onClose: () => void;
   onSaved: (entry: Entry) => void;
 }) {
@@ -161,6 +164,18 @@ export function AssessmentSheet({
               prosthesis. Please talk about{" "}
               {METRICS.map((m) => m.label.toLowerCase()).join(", ")}.
             </p>
+            <div className="rounded-2xl bg-zinc-100 p-3 text-sm">
+              <p className="font-medium">How are you doing today?</p>
+              {questions === null ? (
+                <p className="mt-1 text-zinc-500">Looking at your timeline for more to ask…</p>
+              ) : (
+                <ul className="mt-1 list-disc pl-5">
+                  {questions.map((q) => (
+                    <li key={q}>{q}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}

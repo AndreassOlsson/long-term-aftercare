@@ -240,6 +240,16 @@ export function Timeline({
               ) : (
                 <p className="text-zinc-500">No notes this day.</p>
               )}
+              {selected.questions && selected.questions.length > 0 && (
+                <div className="mt-3 text-sm text-zinc-500">
+                  Asked that day:
+                  <ul className="list-disc pl-5">
+                    {selected.questions.map((q) => (
+                      <li key={q}>{q}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {selected.followUp?.answer && (
                 <p className="mt-3 whitespace-pre-wrap text-sm">
                   <span className="text-zinc-500">{selected.followUp.question}</span>

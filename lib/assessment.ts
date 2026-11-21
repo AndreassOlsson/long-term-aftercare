@@ -1,14 +1,17 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { analyze, summarizeCase } from "./analysis";
+import { analyze } from "./agents/metrics-agent";
+import { getTodaysQuestions } from "./agents/question-agent";
+import { summarizeCase } from "./agents/summary";
 import { isSignedIn } from "./auth";
 import { today } from "./dates";
-import { getEntries, imagePrefix, saveEntry } from "./entries";
+import { getEntries, getQuestionSets, imagePrefix, saveEntry } from "./entries";
 import { combine } from "./metrics";
+import { recordMetrics } from "./metrics-csv";
 import { PATIENTS } from "./patients";
 import { putObject } from "./storage";
-import type { Entry } from "./types";
+import type { Entry, QuestionSet } from "./types";
 
 export type SubmitResult =
   | { status: "followup"; question: string }
@@ -47,7 +50,10 @@ export async function submitAssessment(formData: FormData): Promise<SubmitResult
       })),
     );
     const followUp = question ? { question, answer: answer || null } : null;
-    const analysis = await analyze({ text, images, followUp });
+    const date = today();
+    const questions =
+      (await getQuestionSets(patientId)).filter((set) => set.date === date).pop()?.questions ?? [];
+    const analysis = await analyze({ patientId, date, text, images, questions, followUp });
     if (analysis.followUpQuestion) {
       return { status: "followup", question: analysis.followUpQuestion };
     }
@@ -63,13 +69,14 @@ export async function submitAssessment(formData: FormData): Promise<SubmitResult
     const entry: Entry = {
       id,
       patientId,
-      date: today(),
+      date,
       createdAt: new Date().toISOString(),
       text,
       images: imageKeys,
       scores: analysis.scores,
       combined: combine(analysis.scores),
       rationale: analysis.rationale,
+      questions,
       followUp,
       analyzedBy: analysis.analyzedBy,
       caseSummary: null,
@@ -77,9 +84,21 @@ export async function submitAssessment(formData: FormData): Promise<SubmitResult
     const history = (await getEntries(patientId)).filter((e) => e.date !== entry.date);
     entry.caseSummary = await summarizeCase([...history, entry]);
     await saveEntry(entry);
+    await recordMetrics(patientId, date, entry.scores);
     return { status: "saved", entry };
   } catch (error) {
     console.error("Saving the assessment failed", error);
     return { status: "error", message: "Something went wrong while saving. Try again." };
+  }
+}
+
+/** Today's targeted questions for the patient who is logged in; prepared on first ask. */
+export async function todaysQuestions(): Promise<QuestionSet | null> {
+  if (!(await isSignedIn("patient"))) return null;
+  try {
+    return await getTodaysQuestions(PATIENTS[0].id, today());
+  } catch (error) {
+    console.error("Preparing today's questions failed", error);
+    return null;
   }
 }

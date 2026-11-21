@@ -48,9 +48,11 @@ export async function putObject(
 
 export async function getObject(
   key: string,
+  /** Set for files that get rewritten in place, to skip the CDN's copy. */
+  options: { fresh?: boolean } = {},
 ): Promise<{ body: Buffer; contentType: string } | null> {
   if (storageKind() === "blob") {
-    const result = await get(key, { access: "private" });
+    const result = await get(key, { access: "private", useCache: !options.fresh });
     if (!result || !result.stream) return null;
     const body = Buffer.from(await new Response(result.stream).arrayBuffer());
     return {

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AssessmentSheet } from "./assessment-sheet";
 import { Timeline } from "./timeline";
 import { logout } from "@/lib/actions";
+import { todaysQuestions } from "@/lib/assessment";
 import type { Entry } from "@/lib/types";
 
 // How long the new point is shown on the combined graph before it splits
@@ -32,6 +33,19 @@ export function PatientHome({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [arriving, setArriving] = useState<string | null>(null);
   const [days, setDays] = useState(Math.min(30, initialEntries.length));
+
+  // Today's targeted questions are prepared in the background as soon as the
+  // home screen is open, so they are usually ready when the sheet is.
+  const [questions, setQuestions] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    todaysQuestions()
+      .then((set) => !cancelled && setQuestions(set?.questions ?? []))
+      .catch(() => !cancelled && setQuestions([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!arriving) return;
@@ -110,7 +124,7 @@ export function PatientHome({
         </button>
       </div>
 
-      {sheetOpen && <AssessmentSheet onClose={() => setSheetOpen(false)} onSaved={saved} />}
+      {sheetOpen && <AssessmentSheet questions={questions} onClose={() => setSheetOpen(false)} onSaved={saved} />}
     </main>
   );
 }
