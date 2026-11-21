@@ -1,26 +1,29 @@
 import Link from "next/link";
+import { DemoMenu } from "@/components/clinician/demo-menu";
 import { logout } from "@/lib/actions";
 import { requireRole } from "@/lib/auth";
-import { PATIENTS } from "@/lib/patients";
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
   await requireRole("doctor");
   return (
-    <div className="flex min-h-screen flex-1">
-      <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-zinc-300 p-5">
-        <h2 className="text-sm font-medium text-zinc-500">Patients</h2>
-        <nav className="flex flex-col gap-1">
-          {PATIENTS.map((p) => (
-            <Link key={p.id} href={`/doctor/patients/${p.id}`} className="rounded px-2 py-1 hover:bg-zinc-100">
-              {p.name}
+    <div className="flex min-h-screen flex-1 flex-col">
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-6">
+          <Link href="/doctor" className="font-semibold">
+            Aftercare <span className="font-normal text-muted">· Clinic</span>
+          </Link>
+          <nav className="flex flex-1 gap-1 text-sm">
+            <Link href="/doctor" className="rounded-lg px-3 py-1.5 hover:bg-page">
+              Inbox
             </Link>
-          ))}
-        </nav>
-        <form action={logout.bind(null, "doctor")} className="mt-auto">
-          <button className="text-sm underline">Log out</button>
-        </form>
-      </aside>
-      <main className="min-w-0 flex-1 p-8">{children}</main>
+          </nav>
+          <DemoMenu />
+          <form action={logout.bind(null, "doctor")}>
+            <button className="rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-page">Log out</button>
+          </form>
+        </div>
+      </header>
+      <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-6 py-8">{children}</main>
     </div>
   );
 }

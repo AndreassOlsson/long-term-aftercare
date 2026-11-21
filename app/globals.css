@@ -1,11 +1,27 @@
 @import "tailwindcss";
 
+/* A plain, calm starting look shared by both sides. The real theme is not
+   decided; change the values here and everything built on them follows. */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-page: #f6f7f8;
+  --color-surface: #ffffff;
+  --color-ink: #17212b;
+  --color-muted: #5b6875;
+  --color-line: #dde2e7;
+  --color-accent: #0f6e6a;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: #e3f1f0;
+  --color-good: #1f7a4d;
+  --color-warn: #a35a00;
+  --color-warn-soft: #fbf0df;
+  --color-alert: #b3261e;
+  --color-alert-soft: #fbe9e7;
 }
 
 body {
-  background: #ffffff;
-  color: #171717;
+  background: var(--color-page);
+  color: var(--color-ink);
 }
