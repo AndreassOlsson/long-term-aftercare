@@ -13,6 +13,7 @@ export function GET() {
       DOCTOR_PASSWORD: has("DOCTOR_PASSWORD"),
       SESSION_SECRET: has("SESSION_SECRET"),
       BLOB_READ_WRITE_TOKEN: has("BLOB_READ_WRITE_TOKEN"),
+      ANTHROPIC_API_KEY: has("ANTHROPIC_API_KEY"),
     },
   });
 }

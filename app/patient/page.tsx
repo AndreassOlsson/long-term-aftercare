@@ -1,14 +1,22 @@
-import { Shell } from "@/components/shell";
+import { PatientHome } from "@/components/patient-home";
 import { requireRole } from "@/lib/auth";
+import { today } from "@/lib/dates";
+import { getEntries } from "@/lib/entries";
+import { storageNotice } from "@/lib/notice";
 import { PATIENTS } from "@/lib/patients";
+
+// The analysis runs inside this page's submit action and can take a while.
+export const maxDuration = 60;
 
 export default async function Page() {
   await requireRole("patient");
+  const patient = PATIENTS[0];
   return (
-    <Shell role="patient" heading={PATIENTS[0].name}>
-      <p className="text-zinc-600">
-        Placeholder. The timeline and the form for adding an entry go here.
-      </p>
-    </Shell>
+    <PatientHome
+      firstName={patient.name.split(" ")[0]}
+      initialEntries={await getEntries(patient.id)}
+      today={today()}
+      notice={storageNotice()}
+    />
   );
 }
