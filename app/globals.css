@@ -1,11 +1,41 @@
 @import "tailwindcss";
 
+/*
+  Plaster and ink. The page is the cool grey of casting plaster, text is a
+  deep blue ink, and each metric has its own colour so the combined line can
+  visibly come apart into the three strands it is made of.
+*/
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-atkinson);
+  --font-voice: var(--font-literata);
+
+  --color-plaster: #edf0ee;
+  --color-paper: #fafbf9;
+  --color-ink: #1c2b39;
+  --color-ink-soft: #2c3e4f;
+  --color-slate: #56646f;
+  --color-rule: #cdd5d3;
+  --color-itch: #b0435a;
+  --color-comfort: #8f6210;
+  --color-mobility: #1f7268;
+  --color-alert: #9a2a1c;
+  --color-caution: #f3e7c4;
 }
 
 body {
-  background: #ffffff;
-  color: #171717;
+  background: var(--color-plaster);
+  color: var(--color-ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+input[type="range"] {
+  accent-color: var(--color-ink);
+}
+
+::selection {
+  background: #c9dbd8;
 }

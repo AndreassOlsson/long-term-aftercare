@@ -16,3 +16,13 @@ export function formatDate(date: string): string {
     timeZone: "UTC",
   });
 }
+
+/** "Thursday 19 November", for headings. */
+export function formatLongDate(date: string): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+}

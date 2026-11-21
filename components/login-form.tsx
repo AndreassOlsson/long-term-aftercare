@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { login } from "@/lib/actions";
 import { isConfigured, type Role } from "@/lib/auth";
 
@@ -11,27 +12,43 @@ export function LoginForm({
   failed: boolean;
 }) {
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">{title}</h1>
+    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-12">
+      <Link href="/" className="mb-10 self-start text-slate underline-offset-4 hover:underline">
+        Long-term aftercare
+      </Link>
+      <h1 className="text-[1.75rem] font-bold leading-tight">{title}</h1>
+      <p className="mt-2 text-slate">
+        {role === "patient"
+          ? "Enter the password you were given at your fitting."
+          : "Enter the clinic password."}
+      </p>
+
       {!isConfigured(role) && (
-        <p className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
-          Login is not configured in this environment. See the README for the
-          environment variables.
+        <p className="mt-6 rounded-lg bg-caution px-4 py-3 text-sm leading-relaxed">
+          Login is not set up here yet. Add the passwords as environment
+          variables, as the README describes.
         </p>
       )}
-      <form action={login.bind(null, role)} className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-sm">
+
+      <form action={login.bind(null, role)} className="mt-8 flex flex-col gap-4">
+        <label className="flex flex-col gap-2 font-semibold">
           Password
           <input
             name="password"
             type="password"
             required
             autoFocus
-            className="rounded border border-zinc-300 px-3 py-2 text-base"
+            aria-invalid={failed || undefined}
+            aria-describedby={failed ? "login-error" : undefined}
+            className="rounded-lg border-2 border-rule bg-paper px-4 py-3 text-lg font-normal outline-none focus:border-ink aria-invalid:border-alert"
           />
         </label>
-        {failed && <p className="text-sm text-red-700">Wrong password.</p>}
-        <button className="rounded bg-zinc-900 px-3 py-2 font-medium text-white">
+        {failed && (
+          <p id="login-error" className="text-alert">
+            That password did not match. Check it and try again.
+          </p>
+        )}
+        <button className="mt-2 rounded-lg bg-ink px-4 py-3.5 text-lg font-semibold text-paper hover:bg-ink-soft">
           Log in
         </button>
       </form>

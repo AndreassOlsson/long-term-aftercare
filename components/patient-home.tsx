@@ -6,6 +6,7 @@ import { AssessmentSheet } from "./assessment-sheet";
 import { Timeline } from "./timeline";
 import { logout } from "@/lib/actions";
 import { todaysQuestions } from "@/lib/assessment";
+import { formatLongDate } from "@/lib/dates";
 import type { Entry } from "@/lib/types";
 
 // How long the new point is shown on the combined graph before it splits
@@ -30,7 +31,6 @@ export function PatientHome({
   );
   const [expanded, setExpanded] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [arriving, setArriving] = useState<string | null>(null);
   const [days, setDays] = useState(Math.min(30, initialEntries.length));
 
@@ -72,59 +72,74 @@ export function PatientHome({
 
   const doneToday = entries.some((e) => e.date === today && e.analyzedBy !== "seed");
   const shown = entries.slice(-Math.max(2, days));
+  const latest = [...entries].reverse().find((e) => e.combined !== null);
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 p-5">
-      <h1 className="text-center text-xl font-semibold">Welcome back {firstName}</h1>
-      {notice && (
-        <p className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">{notice}</p>
-      )}
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col px-5 pb-10 pt-6">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-slate">{formatLongDate(today)}</p>
+          <h1 className="mt-1 text-[2rem] font-bold leading-tight tracking-[-0.01em]">Hello, {firstName}</h1>
+        </div>
+        <form action={logout.bind(null, "patient")}>
+          <button className="mt-1 rounded-full px-3 py-2 text-slate underline-offset-4 hover:text-ink hover:underline">
+            Log out
+          </button>
+        </form>
+      </header>
 
-      <Timeline
-        entries={shown}
-        expanded={expanded}
-        onExpandedChange={setExpanded}
-        selectedDate={selectedDate}
-        onSelect={setSelectedDate}
-        arrivingDate={arriving}
-      >
-        <button
-          type="button"
-          onClick={() => setSheetOpen(true)}
-          className="rounded-xl border border-zinc-400 px-3 py-3 font-medium"
-        >
-          {doneToday ? "Update today's assessment" : "Do today's assessment"}
-        </button>
-        <label className="flex flex-col gap-1 text-sm text-zinc-600">
-          Showing the last {shown.length} days
-          <input
-            type="range"
-            min={7}
-            max={Math.max(7, entries.length)}
-            value={days}
-            onChange={(event) => setDays(Number(event.target.value))}
-          />
-        </label>
-      </Timeline>
+      {notice && <p className="mt-5 rounded-lg bg-caution px-4 py-3 text-sm leading-relaxed">{notice}</p>}
 
-      <div className="mt-auto flex flex-col items-end gap-2">
-        {settingsOpen && (
-          <form action={logout.bind(null, "patient")} className="rounded-xl border border-zinc-300 p-3">
-            <button className="underline">Log out</button>
-          </form>
-        )}
-        <button
-          type="button"
-          onClick={() => setSettingsOpen((open) => !open)}
-          aria-label="Settings"
-          aria-expanded={settingsOpen}
-          className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-current"
+      {/* While a day is open the day itself says this, so the room goes to the graph. */}
+      <p hidden={expanded} className="mt-4 max-w-[32ch] text-lg leading-snug">
+        {!latest
+          ? "Your graph starts with your first entry."
+          : doneToday && latest.date === today
+            ? `Today's entry is in. It came to ${latest.combined!.toFixed(1)} of 5.`
+            : `Your last entry, ${formatLongDate(latest.date)}, came to ${latest.combined!.toFixed(1)} of 5.`}
+      </p>
+
+      <div className="mt-6">
+        <Timeline
+          entries={shown}
+          expanded={expanded}
+          onExpandedChange={setExpanded}
+          selectedDate={selectedDate}
+          onSelect={setSelectedDate}
+          arrivingDate={arriving}
         >
-          <span className="block h-5 w-5 rounded-full border-2 border-current" />
-        </button>
+          <p className="-mt-2 text-[15px] text-slate">Tap the graph to open a day, then slide along it.</p>
+          <button
+            type="button"
+            onClick={() => setSheetOpen(true)}
+            className="flex items-center justify-center gap-3 rounded-2xl bg-ink px-5 py-4 text-lg font-semibold text-paper hover:bg-ink-soft"
+          >
+            <PenIcon />
+            {doneToday ? "Change today's entry" : "Write today's entry"}
+          </button>
+          <label className="mt-2 flex flex-col gap-2 text-slate">
+            Showing the last {shown.length} days
+            <input
+              type="range"
+              min={7}
+              max={Math.max(7, entries.length)}
+              value={days}
+              onChange={(event) => setDays(Number(event.target.value))}
+            />
+          </label>
+        </Timeline>
       </div>
 
       {sheetOpen && <AssessmentSheet questions={questions} onClose={() => setSheetOpen(false)} onSaved={saved} />}
     </main>
+  );
+}
+
+function PenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 20h4L19 9l-4-4L4 16v4z" />
+      <path d="M13.5 6.5l4 4" />
+    </svg>
   );
 }

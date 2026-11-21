@@ -9,5 +9,5 @@ export default async function Page({
 }) {
   if (await isSignedIn("patient")) redirect("/patient");
   const { error } = await searchParams;
-  return <LoginForm role="patient" title="Patient login" failed={Boolean(error)} />;
+  return <LoginForm role="patient" title="Your diary" failed={Boolean(error)} />;
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { submitAssessment } from "@/lib/assessment";
 import { METRICS } from "@/lib/metrics";
+import { METRIC_COLOR } from "./metric-colors";
 import type { Entry } from "@/lib/types";
 
 const MAX_IMAGES = 3;
@@ -132,7 +133,7 @@ export function AssessmentSheet({
       result = {
         status: "error" as const,
         message:
-          "The request did not come back. If the app was just updated, reload the page and try again; your text is kept below until you do.",
+          "Your entry did not reach the server. Reload the page and save again. Copy your text first, since reloading clears it.",
       };
     }
     setBusy(false);
@@ -141,43 +142,75 @@ export function AssessmentSheet({
     else setError(result.message);
   }
 
-  const box = "w-full rounded-2xl border border-zinc-400 p-3 text-base";
-  const button = "w-full rounded-xl border border-zinc-400 px-3 py-3 font-medium disabled:opacity-50";
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  const voice =
+    "w-full resize-y rounded-xl border-2 border-rule bg-paper px-4 py-3 font-voice text-[1.125rem] leading-[1.6] outline-none placeholder:text-slate/70 focus:border-ink";
+  const tool =
+    "flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-ink px-3 py-3 font-semibold hover:bg-paper disabled:border-rule disabled:text-slate";
+  const primary =
+    "flex-[2] rounded-xl bg-ink px-4 py-3.5 text-lg font-semibold text-paper hover:bg-ink-soft disabled:bg-rule disabled:text-slate";
+  const canSave = question === null ? Boolean(text.trim()) || images.length > 0 : Boolean(answer.trim());
 
   return (
-    <div className="fixed inset-0 z-10 flex items-end justify-center bg-black/30 p-3 sm:items-center">
+    <div className="fixed inset-0 z-10 flex items-end justify-center bg-ink/40 sm:items-center sm:p-4">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="assessment-title"
-        className="flex max-h-full w-full max-w-md flex-col gap-3 overflow-y-auto rounded-3xl bg-white p-5"
+        className="flex max-h-[94dvh] w-full max-w-md flex-col gap-5 overflow-y-auto rounded-t-[28px] bg-plaster px-5 pb-6 pt-3 shadow-[0_-8px_40px_rgba(28,43,57,0.25)] sm:rounded-[28px] sm:pt-5"
       >
+        <div aria-hidden="true" className="mx-auto h-1.5 w-10 rounded-full bg-rule sm:hidden" />
         <div className="flex items-start justify-between gap-3">
-          <h2 id="assessment-title" className="text-lg font-semibold">
-            Today&apos;s assessment
+          <h2 id="assessment-title" className="text-2xl font-bold leading-tight">
+            {question === null ? "Today\u2019s entry" : "One more question"}
           </h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-lg leading-none">
-            ✕
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Close without saving"
+            className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full hover:bg-paper"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
           </button>
         </div>
 
         {question === null ? (
           <>
-            <p className="text-sm text-zinc-700">
-              Express freely with text or images about your experience with the
-              prosthesis. Please talk about{" "}
-              {METRICS.map((m) => m.label.toLowerCase()).join(", ")}.
-            </p>
-            <div className="rounded-2xl bg-zinc-100 p-3 text-sm">
-              <p className="font-medium">How are you doing today?</p>
+            <div>
+              <p className="leading-relaxed text-slate">
+                Write, or say, how it has been. Mention{" "}
+                {METRICS.map((m, i) => (
+                  <span key={m.key}>
+                    {i > 0 && (i === METRICS.length - 1 ? " and " : ", ")}
+                    <span className="font-semibold" style={{ color: METRIC_COLOR[m.key] }}>
+                      {m.label.toLowerCase()}
+                    </span>
+                  </span>
+                ))}{" "}
+                if you can.
+              </p>
               {questions === null ? (
-                <p className="mt-1 text-zinc-500">Looking at your timeline for more to ask…</p>
+                <p className="mt-3 text-slate">Reading your earlier entries for things to ask…</p>
               ) : (
-                <ul className="mt-1 list-disc pl-5">
-                  {questions.map((q) => (
-                    <li key={q}>{q}</li>
-                  ))}
-                </ul>
+                questions.length > 0 && (
+                  <ul className="mt-3 flex flex-col gap-2">
+                    {questions.map((q) => (
+                      <li key={q} className="border-l-[3px] border-ink pl-3 leading-snug">
+                        {q}
+                      </li>
+                    ))}
+                  </ul>
+                )
               )}
             </div>
             <textarea
@@ -185,10 +218,11 @@ export function AssessmentSheet({
               onChange={(event) => setText(event.target.value)}
               rows={6}
               aria-label="Your notes for today"
-              className={box}
+              placeholder="Today the socket felt…"
+              className={voice}
             />
             {images.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3">
                 {images.map((image, i) => (
                   <button
                     key={image.url}
@@ -198,8 +232,10 @@ export function AssessmentSheet({
                     className="relative"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.url} alt="" className="h-16 w-16 rounded-lg object-cover" />
-                    <span className="absolute -right-1 -top-1 rounded-full bg-white px-1 text-xs">✕</span>
+                    <img src={image.url} alt="" className="h-20 w-20 rounded-lg object-cover" />
+                    <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs text-paper">
+                      ✕
+                    </span>
                   </button>
                 ))}
               </div>
@@ -207,63 +243,95 @@ export function AssessmentSheet({
           </>
         ) : (
           <>
-            <p className="text-sm text-zinc-700">One more thing, if you like:</p>
-            <p className="font-medium">{question}</p>
+            <p className="text-lg font-semibold leading-snug">{question}</p>
             <textarea
               value={answer}
               onChange={(event) => setAnswer(event.target.value)}
               rows={4}
               aria-label="Your answer"
-              className={box}
+              className={voice}
             />
           </>
         )}
 
-        {canTalk && (
-          <button type="button" onClick={toggleTalk} disabled={busy} className={button}>
-            {listening ? "Stop talking" : "Talk"}
-          </button>
-        )}
-        {question === null && (
-          <>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              hidden
-              onChange={(event) => addPictures(event.target.files)}
-            />
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              disabled={busy || images.length >= MAX_IMAGES}
-              className={button}
-            >
-              Take a picture
-            </button>
-          </>
+        {(canTalk || question === null) && (
+          <div className="flex gap-3">
+            {canTalk && (
+              <button
+                type="button"
+                onClick={toggleTalk}
+                disabled={busy}
+                aria-pressed={listening}
+                className={`${tool} ${listening ? "border-itch bg-paper text-itch" : ""}`}
+              >
+                {listening ? (
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-itch" aria-hidden="true" />
+                ) : (
+                  <MicIcon />
+                )}
+                {listening ? "Stop" : "Speak"}
+              </button>
+            )}
+            {question === null && (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  hidden
+                  onChange={(event) => addPictures(event.target.files)}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={busy || images.length >= MAX_IMAGES}
+                  className={tool}
+                >
+                  <CameraIcon />
+                  {images.length >= MAX_IMAGES ? "3 pictures" : "Add picture"}
+                </button>
+              </>
+            )}
+          </div>
         )}
 
-        {error && <p className="text-sm text-red-700">{error}</p>}
+        {error && (
+          <p role="alert" className="rounded-lg bg-paper px-4 py-3 leading-relaxed text-alert">
+            {error}
+          </p>
+        )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-3">
           {question !== null && (
-            <button type="button" onClick={() => submit(true)} disabled={busy} className={button}>
+            <button type="button" onClick={() => submit(true)} disabled={busy} className={tool}>
               Skip
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => submit(false)}
-            disabled={busy || (question === null ? !text.trim() && images.length === 0 : !answer.trim())}
-            className={`${button} bg-zinc-900 text-white`}
-          >
-            {busy ? "Working on it…" : question === null ? "Done" : "Answer"}
+          <button type="button" onClick={() => submit(false)} disabled={busy || !canSave} className={primary}>
+            {busy ? "Reading your entry…" : question === null ? "Save entry" : "Save answer"}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="3" width="6" height="12" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
   );
 }
