@@ -23,6 +23,8 @@ export type AnalysisInput = {
   questions: string[];
   /** Set on the second pass, when the patient has answered or skipped. */
   followUp: { question: string; answer: string | null } | null;
+  /** The check-in screen shows what could not be read and lets the patient add it, so no follow-up is asked. */
+  noFollowUp?: boolean;
 };
 
 export type AnalysisResult = {
@@ -107,7 +109,7 @@ async function analyzeWithClaude(input: AnalysisInput): Promise<AnalysisResult> 
     scores: result.scores,
     rationale: result.rationale,
     followUpQuestion:
-      input.followUp || missingMetrics(result.scores).length === 0 ? null : result.followUp,
+      input.followUp || input.noFollowUp || missingMetrics(result.scores).length === 0 ? null : result.followUp,
     analyzedBy: "claude",
   };
 }
@@ -132,7 +134,7 @@ function analyzeWithKeywords(input: AnalysisInput): AnalysisResult {
     scores,
     rationale: "Scored by the built-in keyword stand-in, not by the AI analysis.",
     followUpQuestion:
-      input.followUp || missing.length === 0
+      input.followUp || input.noFollowUp || missing.length === 0
         ? null
         : `Could you also say a little about ${missing.map((m) => m.label.toLowerCase()).join(" and ")} today?`,
     analyzedBy: "dummy",
