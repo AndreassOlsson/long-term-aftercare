@@ -264,6 +264,13 @@ export function Timeline({
                   </li>
                 ))}
               </ul>
+              {selected.analyzedBy !== "seed" && (
+                <p className="mt-2 text-xs text-zinc-500">
+                  {selected.analyzedBy === "claude"
+                    ? `Scored by the AI analysis. ${selected.rationale}`
+                    : "Scored by the built-in stand-in, not the AI analysis."}
+                </p>
+              )}
             </div>
           </div>
         </div>
