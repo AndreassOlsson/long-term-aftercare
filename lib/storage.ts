@@ -10,7 +10,9 @@ import { get, list, put } from "@vercel/blob";
 export type StorageKind = "blob" | "disk" | "temporary";
 
 export function storageKind(): StorageKind {
-  if (process.env.BLOB_READ_WRITE_TOKEN) return "blob";
+  // A connected store shows up either as a read-write token or, on newer
+  // projects, as a store id that the SDK pairs with Vercel's own identity.
+  if (process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID) return "blob";
   // On Vercel without a Blob store the only writable place is the temp
   // folder, which is wiped between invocations: nothing really persists.
   return process.env.VERCEL ? "temporary" : "disk";
