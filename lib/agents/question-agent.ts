@@ -11,15 +11,15 @@ import { metricGuide, recordTools } from "./tools";
 
 // AGENT 2: today's targeted questions. Before the patient writes anything it
 // looks at their record (recent and long-term datapoints, what they wrote,
-// their pictures, what they were already asked) and picks a few questions
-// worth asking today, next to the plain "how are you doing".
+// their pictures, what they were already asked) and picks the one question
+// most worth asking today, next to the plain "how are you doing".
 //
-// The questions are prepared once per day and kept, so reopening the
-// assessment shows the same ones, and tomorrow's run can see today's.
+// The question is prepared once per day and kept, so reopening the
+// assessment shows the same one, and tomorrow's run can see today's.
 
-const MAX_QUESTIONS = 3;
+const MAX_QUESTIONS = 1;
 
-const SYSTEM = `A patient with an orthosis or prosthesis does a short daily check-in in an app: they are always asked how they are doing, and they answer freely in text, by voice or with pictures. Your job is to prepare the few extra questions that are worth asking this patient today, based on their own record, so the check-in feels like someone has been paying attention.
+const SYSTEM = `A patient with an orthosis or prosthesis does a short daily check-in in an app: they are always asked how they are doing, and they answer freely in text, by voice or with pictures. Your job is to prepare the one extra question that is most worth asking this patient today, based on their own record, so the check-in feels like someone has been paying attention.
 
 Their answers are later turned into three scores per day, each 1 to 5 with 5 as the good end:
 ${metricGuide}
@@ -32,19 +32,19 @@ Look at the record with the tools before you decide:
 
 The point of the questions is to get her to reflect on her own patterns, and to get into the record what a clinician would have asked. So prefer questions that make her connect things over questions that ask for a status: what she was doing before it got worse, what differed on the good days and the bad ones, the time of day it starts, whether it comes with long walks, a hot day, a new routine, whether it has been the same on both sides, what she did that helped. Ask about the pattern you actually see in her record, and say what you saw ("the last three entries where you walked far are the three itchy ones").
 
-Then write one to ${MAX_QUESTIONS} questions. Make them personal and concrete: "You wrote on Tuesday that the socket had started to rub on the outside of your knee. What were you doing before it started, and does it come on at a certain time of day?" is the kind of question wanted, "How is your comfort?" is not. One question should be open enough to answer in her own words. Keep each to a sentence or two, warm and plain, in the language the patient writes in. If the record shows nothing in particular, one light question is enough.
+Then write exactly one question, the one most worth asking today and not the first of several. Make it personal and concrete: "You wrote on Tuesday that the socket had started to rub on the outside of your knee. What were you doing before it started, and does it come on at a certain time of day?" is the kind of question wanted, "How is your comfort?" is not. It should be open enough to answer in her own words. Keep it to a sentence or two, warm and plain, in the language the patient writes in. If the record shows nothing in particular, make it a light one.
 
 You are not giving medical advice and you do not diagnose or alarm: you ask, you do not conclude.
 
-When you are done, call set_todays_questions exactly once, with the questions and one sentence on what in the record they are based on.`;
+When you are done, call set_todays_questions exactly once, with the one question and one sentence on what in the record it is based on.`;
 
 async function askClaude(patientId: string, date: string) {
   let chosen: { questions: string[]; basedOn: string } | null = null;
   const setTodaysQuestions = betaZodTool({
     name: "set_todays_questions",
-    description: "Hand in today's questions. Call this exactly once, when you are done.",
+    description: "Hand in today's one question. Call this exactly once, when you are done.",
     inputSchema: z.object({
-      questions: z.array(z.string()),
+      questions: z.array(z.string()).describe("Exactly one question"),
       based_on: z.string(),
     }),
     run: (args) => {
@@ -110,7 +110,7 @@ async function askFromNumbers(patientId: string, date: string) {
   }
   return {
     questions: questions.slice(0, MAX_QUESTIONS),
-    basedOn: `Built-in stand-in, not the AI: ${reasons.join("; ")}.`,
+    basedOn: `Built-in stand-in, not the AI: ${reasons[0]}.`,
   };
 }
 

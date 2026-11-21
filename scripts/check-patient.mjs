@@ -1,8 +1,9 @@
 // Drives the built app in a phone-sized browser through the patient's side, and
 // through the demo as the team will show it (a second, desktop browser is the
 // clinician's, open on the inbox the whole time):
-//   login -> every section is its own page the height of the screen, and a tap
-//   or a swipe rests exactly on a page -> the home page shows the graph and the
+//   the front page into the patient's side with no password, and an old
+//   login link still signs in -> the sections stack with no scroll-snap, and
+//   home is one screen -> the home page shows the graph and the
 //   check-in action and nothing to scroll past -> THE DEMO PATH from the reset
 //   state (the record already shows a decline; today not reported): a check-in
 //   with the unhealthy photo, one question about today in view of the days
@@ -58,7 +59,6 @@ function check(name, cond, why = "") {
 
 let server = null;
 let base = process.env.BASE_URL;
-const password = process.env.PATIENT_PASSWORD ?? env.PATIENT_PASSWORD;
 if (!base) {
   const port = 3100 + Math.floor(Math.random() * 800);
   base = `http://localhost:${port}`;
@@ -116,7 +116,6 @@ const squash = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "");
 const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 const SECTIONS = ["home", "history", "ideas", "clinic", "settings"];
 const nav = (label) => page.locator("nav[aria-label=Main] button", { hasText: label });
-const client = await context.newCDPSession(page);
 
 /** Waits until the document has stopped moving, then says where it rests. */
 async function rest() {
@@ -130,63 +129,53 @@ async function rest() {
   return last;
 }
 const viewportHeight = () => page.evaluate(() => window.innerHeight);
-const onPage = async () => {
-  const y = await rest();
-  const h = await viewportHeight();
-  return { y, h, index: Math.round(y / h), exact: Math.abs(y / h - Math.round(y / h)) * h < 1.5 };
-};
 
 // The clinician's side, a desktop browser, logged in and open on the inbox the whole time.
 const doctorContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const doctorPage = await doctorContext.newPage();
 doctorPage.setDefaultTimeout(60_000);
-const doctorPassword = process.env.DOCTOR_PASSWORD ?? env.DOCTOR_PASSWORD;
 
 try {
-  // 1. login
-  await page.goto(`${base}/patient/login`);
-  await shot("01-login");
-  await page.fill('input[name="password"]', password);
-  await page.click("button");
+  // 1. the front page leads in, with no password to type
+  await page.goto(base);
+  await shot("01-front-page");
+  await page.getByRole("link", { name: /I am a patient/ }).click();
   await page.waitForURL(`${base}/patient`);
-  ok("login");
+  check("the front page leads into the patient's side with no password field", (await page.locator('input[type="password"]').count()) === 0);
+  // an old link to the login page still gets her in
+  await page.context().clearCookies();
+  await page.goto(`${base}/patient/login`);
+  await page.waitForURL(`${base}/patient`);
+  ok("an old link to /patient/login signs in and moves on");
 
-  await doctorPage.goto(`${base}/doctor/login`);
-  await doctorPage.fill('input[name="password"]', doctorPassword);
-  await doctorPage.click('button:has-text("Log in")');
+  await doctorPage.goto(base);
+  await doctorPage.getByRole("link", { name: /I am a clinician/ }).click();
   await doctorPage.waitForURL(`${base}/doctor`);
+  check("the front page leads into the clinician's side with no password field", (await doctorPage.locator('input[type="password"]').count()) === 0);
   await doctorContext.request.post(`${base}/api/demo/reset`);
   await doctorPage.reload();
 
-  // 2. the sections: each its own page, the height of the screen, with a snap between them
+  // 2. the sections: stacked pages, no snapping anywhere, home exactly one screen
   await page.reload();
   await page.getByRole("heading", { name: /Good|Hello/ }).waitFor();
   const frames = await page.$$eval("section[data-page]", (els) => els.map((e) => ({ id: e.id, h: e.getBoundingClientRect().height, top: e.offsetTop })));
   const vh = await viewportHeight();
   check("the patient's side has the sections " + SECTIONS.join(", "), JSON.stringify(frames.map((f) => f.id)) === JSON.stringify(SECTIONS), JSON.stringify(frames.map((f) => f.id)));
-  check("every section is its own page the height of the screen", frames.every((f) => Math.abs(f.h - vh) < 1), JSON.stringify({ vh, frames }));
-  check("the pages follow one another with nothing between", frames.every((f, i) => Math.abs(f.top - i * vh) < 1.5));
+  check("home is exactly one screen and every other section at least one", Math.abs(frames[0].h - vh) < 1 && frames.every((f) => f.h >= vh - 1), JSON.stringify({ vh, frames }));
+  const snapping = await page.evaluate(() => [...document.querySelectorAll("*"), document.documentElement].filter((e) => { const c = getComputedStyle(e); return c.scrollSnapType !== "none" || c.scrollSnapAlign !== "none"; }).map((e) => e.tagName + "#" + e.id));
+  check("no element of the patient's side has scroll-snap", snapping.length === 0, JSON.stringify(snapping));
   check("the bar names where she is", (await nav("Home").getAttribute("aria-current")) === "page");
   await shot("02-home");
   for (const [i, label] of ["Home", "History", "Ideas", "Clinic", "Settings"].entries()) {
     if (i > 0) {
       await nav(label).click();
-      await page.waitForTimeout(100);
+      await rest();
     }
-    const at = await onPage();
-    check(`a tap on ${label} rests exactly on its page`, at.exact && at.index === i, JSON.stringify(at));
+    const top = await page.evaluate((id) => Math.abs(document.getElementById(id).getBoundingClientRect().top), SECTIONS[i]);
+    check(`a tap on ${label} takes her to its page`, top < 2 || i === SECTIONS.length - 1, String(top));
     check(`and the bar says she is on ${label}`, (await nav(label).getAttribute("aria-current")) === "page");
-    if (i > 0 || true) await shot(`03-page-${SECTIONS[i]}`);
+    await shot(`03-page-${SECTIONS[i]}`);
   }
-  // A swipe settles on a page, never halfway: a short one goes back or stays, a long one moves on.
-  await nav("Home").click();
-  await rest();
-  await client.send("Input.synthesizeScrollGesture", { x: 195, y: 600, yDistance: -260, speed: 600, gestureSourceType: "touch" });
-  const swiped = await onPage();
-  check("a swipe up rests exactly on a page", swiped.exact, JSON.stringify(swiped));
-  await client.send("Input.synthesizeScrollGesture", { x: 195, y: 300, yDistance: 260, speed: 600, gestureSourceType: "touch" });
-  const swipedBack = await onPage();
-  check("a swipe down rests exactly on a page", swipedBack.exact, JSON.stringify(swipedBack));
   await nav("Home").click();
   await rest();
 
@@ -201,6 +190,9 @@ try {
   });
   await page.getByRole("link", { name: "Check in" }).waitFor();
   await page.locator("[data-testid=home-graph] svg").waitFor();
+  const fits = () => page.evaluate(() => ({ page: document.documentElement.scrollHeight - innerHeight, home: document.getElementById("home").scrollHeight - document.getElementById("home").clientHeight, vh: innerHeight, w: innerWidth }));
+  const fitsFresh = await fits();
+  check("home at 390 by 844 fits the screen without scrolling, not yet checked in", fitsFresh.w === 390 && fitsFresh.vh === 844 && fitsFresh.home <= 1, JSON.stringify(fitsFresh));
   check("home shows the graph and the check-in action and nothing to scroll past", homeBox.scrolls <= 1 && homeBox.graph.top >= 0 && homeBox.action.bottom <= homeBox.barTop + 1 && homeBox.graph.h > 200, JSON.stringify(homeBox));
   check("the graph takes the screen: more than a third of its height", homeBox.graph.h > homeBox.vh / 3, JSON.stringify(homeBox.graph));
   const homeText = await page.locator("#home").innerText();
@@ -225,6 +217,8 @@ try {
   await page.getByRole("link", { name: "Check in" }).click();
   await page.waitForURL(`${base}/patient/checkin`);
   await page.getByLabel("Your notes for today").waitFor();
+  await page.getByTestId("todays-questions").waitFor();
+  check("the check-in shows exactly one question", (await page.locator("[data-testid=todays-questions] li").count()) === 1);
   await shot("05-checkin", true);
   await page.getByLabel("Your notes for today").fill("qx");
   await page.getByRole("button", { name: "Continue" }).click();
@@ -318,6 +312,9 @@ try {
   check("and offers to correct today's entry and to remove it", (await page.getByRole("link", { name: "Correct today’s entry" }).count()) === 1 && (await page.getByRole("button", { name: "Remove it" }).count()) === 1);
   const filled = await page.getByTestId("graph-last-point").getAttribute("data-date");
   check("today's point is the last in the graph", filled === entered.today, String(filled));
+  const fitsDone = await fits();
+  check("home at 390 by 844 fits the screen without scrolling, already checked in", fitsDone.home <= 1 && fitsDone.vh === 844, JSON.stringify(fitsDone));
+  await shot("10-home-checked-in");
   const doneBox = await page.evaluate(() => {
     const f = document.getElementById("home");
     return { scrolls: f.scrollHeight - f.clientHeight };
@@ -463,11 +460,13 @@ try {
   check("the history shows a day's words and a way to move the window", /What you wrote/.test(histText) && (await page.getByRole("button", { name: "Show earlier" }).count()) === 1);
   await page.goto(`${base}/patient/history?day=${healthyDay.date}`);
   await page.waitForURL(/\/patient\?day=.*#history/);
-  const landed = await onPage();
-  check("the old address of the history lands on its page", landed.index === 1 && landed.exact, JSON.stringify(landed));
+  const atTop = (id) => page.evaluate((i) => Math.abs(document.getElementById(i).getBoundingClientRect().top), id);
+  await page.waitForTimeout(300);
+  check("the old address of the history lands on its page", (await atTop("history")) < 2);
   await page.goto(`${base}/patient/clinic`);
   await page.waitForURL(/\/patient#clinic/);
-  check("and so does the clinic's", (await onPage()).index === 3);
+  await page.waitForTimeout(300);
+  check("and so does the clinic's", (await atTop("clinic")) < 2);
 
   // 19. the demo reset: today back to not yet reported
   const reset = await doctorContext.request.post(`${base}/api/demo/reset`);
