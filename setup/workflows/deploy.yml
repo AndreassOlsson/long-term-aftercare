@@ -1,0 +1,73 @@
+name: Deploy
+
+# Deploys from here and not from Vercel's own git hook, so that a push
+# deploys whoever made it (teammates and agents included).
+# main goes to production; a pull request gets a preview URL.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Pull requests from forks cannot read the secrets.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check that the Vercel secrets exist
+        id: secrets
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Vercel secrets are not set yet; skipping the deploy. See the README." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build and deploy
+        id: deploy
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            target=production; flag=--prod
+          else
+            target=preview; flag=
+          fi
+          npx --yes vercel@latest pull --yes --environment=$target --token="$VERCEL_TOKEN"
+          npx vercel@latest build $flag --token="$VERCEL_TOKEN"
+          url=$(npx vercel@latest deploy --prebuilt $flag --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed to $target: $url" >> "$GITHUB_STEP_SUMMARY"
+      - name: Post the preview URL on the pull request
+        if: steps.secrets.outputs.ready == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- vercel-preview -->';
+            const body = `${marker}\nPreview: ${{ steps.deploy.outputs.url }}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const mine = comments.find((c) => c.body.includes(marker));
+            if (mine) await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
