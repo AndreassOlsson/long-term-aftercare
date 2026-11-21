@@ -39,19 +39,13 @@ Then open http://localhost:3000. The example passwords are `maria` and `doctor`.
 
 ## Checks and deploys
 
-Two GitHub Actions workflows do this. They are parked in `setup/workflows/` because the agent that wrote them is not allowed to write under `.github/workflows/`; step 0 below moves them into place.
+Two GitHub Actions workflows in `.github/workflows/` do this. Agents cannot write to that folder, so a change to a workflow has to be committed by a person.
 
 `ci.yml` runs lint, typecheck and build on every pull request and every push to `main`.
 
 `deploy.yml` deploys to Vercel: a push to `main` goes to production, a pull request gets a preview URL posted as a comment. Vercel's own git deploys are switched off in `vercel.json`, because on the free plan they skip commits from anyone but the account owner.
 
 ## One-time setup on Vercel and GitHub
-
-0. Move the workflows into place and push (a person has to do this once):
-
-   ```bash
-   mkdir -p .github && git mv setup/workflows .github/workflows && git commit -m "Enable CI and deploy workflows" && git push
-   ```
 
 1. On vercel.com, import this repository as a new project (framework Next.js, defaults).
 2. In the project, under Settings then Environment Variables, add `PATIENT_PASSWORD`, `DOCTOR_PASSWORD` and `SESSION_SECRET` (any long random string) for Production and Preview.
